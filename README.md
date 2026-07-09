@@ -80,6 +80,12 @@ data/demo/                       Labeled fallback demo bundles (4 verticals)
 ## Safety
 
 - No private pages, no login bypass, no CAPTCHA bypass, no paywall bypass.
+- robots.txt compliance (`lib/robots.ts`): set `STRICT_ROBOTS=true` and every
+  website-audit fetch (homepages, linked pages, and each redirect hop) first
+  checks the site's robots.txt, honoring user-agent groups, `Allow`/`Disallow`
+  longest-match rules, `*` wildcards, and `$` anchors. Results are cached for
+  24 hours; an unreachable or malformed robots.txt fails open so audits keep
+  working. Off by default.
 - SSRF protection (`lib/url-safety.ts`) blocks fetches to localhost, private
   IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), link-local addresses
   (including the 169.254.169.254 cloud metadata address), and IPv6
