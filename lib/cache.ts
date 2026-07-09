@@ -2,11 +2,15 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const CACHE_ROOT = process.env.CACHE_DIR
-  ? path.resolve(process.cwd(), process.env.CACHE_DIR)
-  : path.resolve(process.cwd(), ".cache");
-
 export type CacheBucket = "geocode" | "reports" | "homepages" | "robots";
+
+// Resolved lazily (not at module scope) so Next's file tracer does not treat
+// the dynamic env-driven path as a signal to trace the whole project.
+function getCacheRoot(): string {
+  return process.env.CACHE_DIR
+    ? path.resolve(/* turbopackIgnore: true */ process.cwd(), process.env.CACHE_DIR)
+    : path.resolve(process.cwd(), ".cache");
+}
 
 function hashKey(key: string): string {
   return crypto.createHash("sha256").update(key).digest("hex");
@@ -17,7 +21,7 @@ async function ensureDir(dir: string) {
 }
 
 function bucketDir(bucket: CacheBucket): string {
-  return path.join(CACHE_ROOT, bucket);
+  return path.join(getCacheRoot(), bucket);
 }
 
 export async function readCache<T>(
