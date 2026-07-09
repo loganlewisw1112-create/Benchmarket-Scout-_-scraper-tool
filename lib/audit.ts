@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { CACHE_TTL, readCache, writeCache } from "./cache";
+import { isPathAllowed } from "./robots";
 import { KEYWORDS, extractSocialLinksFromHrefs } from "./signals";
 import type { EvidenceItem, ExtractedLink, WebsiteAudit } from "./types";
 import { isSafePublicHttpUrl, normalizeHttpUrl } from "./url-safety";
@@ -42,6 +43,13 @@ async function safeFetchHtml(rawUrl: string): Promise<FetchOutcome> {
     const isSafe = await isSafePublicHttpUrl(normalized);
     if (!isSafe) {
       return { ok: false, reason: "URL failed public safety check" };
+    }
+
+    // No-op unless STRICT_ROBOTS=true; covers homepage, linked pages, and
+    // every redirect hop since each pass through this loop re-checks.
+    const robotsAllowed = await isPathAllowed(normalized);
+    if (!robotsAllowed) {
+      return { ok: false, reason: "Disallowed by robots.txt" };
     }
 
     const controller = new AbortController();
