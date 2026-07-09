@@ -16,8 +16,8 @@
     "jspdf-autotable": "^5.0.8",
     "next": "16.2.10",
     "p-limit": "^7.3.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
