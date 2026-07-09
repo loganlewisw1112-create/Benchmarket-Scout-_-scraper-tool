@@ -1,36 +1,105 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Benchmark Scout
 
-## Getting Started
+## What it does
 
-First, run the development server:
+Benchmark Scout is a local competitor intelligence MVP. It finds local
+competitors using free public data, audits public websites, scans public
+signals, ranks the market, generates concise reports, and exports PDF
+reports.
+
+## Run
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Open
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+http://localhost:3000
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Demo mode
 
-## Learn More
+The app defaults to `DEMO_MODE=auto`. It uses live public data first and
+labeled fallback data if free public sources are sparse or unavailable.
 
-To learn more about Next.js, take a look at the following resources:
+Set `DEMO_MODE` in `.env.local` to override:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `live` — only live public data; still fails gracefully.
+- `auto` (default) — live public data first, repaired with labeled fallback
+  data when sparse or unavailable.
+- `mock` — skips external calls entirely and uses local demo bundles only.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+You can also pass `options.demoMode` in the API request body per-call.
 
-## Deploy on Vercel
+## Free sources
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Nominatim** for market geocoding
+- **Overpass / OpenStreetMap** for local competitor discovery
+- **Public websites** for website audits (fetched directly, no paid APIs)
+- **GDELT** for public news mentions
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+No paid APIs, no accounts, no Google Places/Yelp/SerpApi/LinkedIn/Instagram/
+TikTok/X APIs are used anywhere in this project.
+
+## PDF export
+
+After a report is generated, click "Download PDF Report." PDF export is
+generated client-side (via `jsPDF` + `jspdf-autotable`) from the same report
+data already shown on the dashboard — no second backend call is made.
+
+## Report quality
+
+Reports are concise, deterministic, evidence-backed, and confidence-labeled.
+Findings are directional public-signal observations, not verified internal
+facts. Report text is generated from templates driven by computed scores and
+signals — no LLM is used to generate report content.
+
+## Project structure
+
+```
+app/
+  page.tsx                      Dashboard UI (form, loading, results)
+  api/analyze-market/route.ts   POST endpoint running the analysis pipeline
+
+components/                     Dashboard UI building blocks
+lib/                             Pipeline: geocoding, discovery, auditing,
+                                  signal extraction, scoring, report/PDF gen
+data/demo/                       Labeled fallback demo bundles (4 verticals)
+```
+
+## Limitations
+
+- Free OSM data does not reliably include ratings or reviews.
+- Social platforms are not scraped behind logins or restrictions — only
+  profile links found on public pages are surfaced.
+- Findings are public signals, not verified internal business facts.
+- Fallback demo rows are labeled as such in the dashboard, the PDF, and the
+  API response (`source: "mock"`).
+
+## Safety
+
+- No private pages, no login bypass, no CAPTCHA bypass, no paywall bypass.
+- SSRF protection (`lib/url-safety.ts`) blocks fetches to localhost, private
+  IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), link-local addresses
+  (including the 169.254.169.254 cloud metadata address), and IPv6
+  loopback/private/link-local ranges. DNS results are re-checked, not just
+  the literal hostname, and redirects are capped and re-validated.
+
+## Environment variables
+
+```bash
+DEMO_MODE=auto
+APP_USER_AGENT="BenchmarkScout/0.1 (contact: your-email@yourdomain.com)"
+CACHE_DIR=".cache"
+STRICT_ROBOTS=false
+```
+
+All are optional; sensible defaults are used if unset.
+
+> **Important:** don't use `example.com` (or any address at that domain) in
+> `APP_USER_AGENT`. Nominatim's and Overpass's edge networks actively block
+> any request whose User-Agent contains `example.com` — it's a common
+> leftover placeholder in unconfigured scrapers, so their WAFs treat it as a
+> signal to reject the request outright (a 403/406 with no useful error
+> body). Use a real contact address instead.

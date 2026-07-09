@@ -1,0 +1,377 @@
+{
+  "businessType": "landscaping",
+  "market": "Dallas, TX",
+  "competitors": [
+    {
+      "name": "Greenline Landscape Co.",
+      "website": "https://greenlinelandscapedemo.com",
+      "phone": "(300) 555-0110",
+      "address": "100 Main St, Dallas, TX",
+      "websiteScore": 87,
+      "localPresenceScore": 48,
+      "scoreBreakdown": {
+        "seo": 21,
+        "conversion": 18,
+        "trust": 17,
+        "content": 11,
+        "technical": 10
+      },
+      "flags": {
+        "hasTestimonials": false,
+        "hasBookingOrQuote": true,
+        "hasPricingPage": true,
+        "hasBlogOrNewsPage": true,
+        "hasCareersPage": false,
+        "hasSocialLinks": true
+      },
+      "momentumSignals": [
+        {
+          "label": "Award or recognition language",
+          "evidence": "Greenline Landscape Co. homepage uses \"award\" or \"top rated\" language."
+        }
+      ],
+      "offerSignals": [],
+      "hiringSignals": [
+        {
+          "label": "Actively hiring",
+          "evidence": "Greenline Landscape Co. has a careers page referencing open roles."
+        }
+      ],
+      "riskSignals": [],
+      "changeSignals": [],
+      "socialLinks": {
+        "facebook": "https://facebook.com/greenlinelandscapedemo"
+      }
+    },
+    {
+      "name": "Bluebonnet Lawn & Garden",
+      "website": "https://bluebonnetlawndemo.com",
+      "phone": "(301) 555-0111",
+      "address": "112 Main St, Dallas, TX",
+      "websiteScore": 43,
+      "localPresenceScore": 82,
+      "scoreBreakdown": {
+        "seo": 9,
+        "conversion": 9,
+        "trust": 6,
+        "content": 8,
+        "technical": 10
+      },
+      "flags": {
+        "hasTestimonials": false,
+        "hasBookingOrQuote": true,
+        "hasPricingPage": false,
+        "hasBlogOrNewsPage": false,
+        "hasCareersPage": true,
+        "hasSocialLinks": true
+      },
+      "momentumSignals": [],
+      "offerSignals": [
+        {
+          "label": "Financing available",
+          "evidence": "Bluebonnet Lawn & Garden mentions financing or monthly payment plans."
+        }
+      ],
+      "hiringSignals": [
+        {
+          "label": "Actively hiring",
+          "evidence": "Bluebonnet Lawn & Garden has a careers page referencing open roles."
+        }
+      ],
+      "riskSignals": [],
+      "changeSignals": [],
+      "socialLinks": {
+        "facebook": "https://facebook.com/bluebonnetlawndemo",
+        "instagram": "https://instagram.com/bluebonnetlawndemo"
+      }
+    },
+    {
+      "name": "Heritage Outdoor Living",
+      "website": "https://heritageoutdoordemo.com",
+      "phone": "(302) 555-0112",
+      "address": "124 Main St, Dallas, TX",
+      "websiteScore": 85,
+      "localPresenceScore": 84,
+      "scoreBreakdown": {
+        "seo": 18,
+        "conversion": 14,
+        "trust": 11,
+        "content": 12,
+        "technical": 10
+      },
+      "flags": {
+        "hasTestimonials": true,
+        "hasBookingOrQuote": true,
+        "hasPricingPage": false,
+        "hasBlogOrNewsPage": false,
+        "hasCareersPage": false,
+        "hasSocialLinks": true
+      },
+      "momentumSignals": [],
+      "offerSignals": [],
+      "hiringSignals": [],
+      "riskSignals": [],
+      "changeSignals": [],
+      "socialLinks": {
+        "facebook": "https://facebook.com/heritageoutdoordemo",
+        "instagram": "https://instagram.com/heritageoutdoordemo"
+      }
+    },
+    {
+      "name": "Prairie Edge Landscaping",
+      "website": "https://prairieedgedemo.com",
+      "phone": "(303) 555-0113",
+      "address": "136 Main St, Dallas, TX",
+      "websiteScore": 44,
+      "localPresenceScore": 34,
+      "scoreBreakdown": {
+        "seo": 10,
+        "conversion": 8,
+        "trust": 6,
+        "content": 9,
+        "technical": 10
+      },
+      "flags": {
+        "hasTestimonials": false,
+        "hasBookingOrQuote": true,
+        "hasPricingPage": false,
+        "hasBlogOrNewsPage": true,
+        "hasCareersPage": false,
+        "hasSocialLinks": false
+      },
+      "momentumSignals": [],
+      "offerSignals": [],
+      "hiringSignals": [
+        {
+          "label": "Actively hiring",
+          "evidence": "Prairie Edge Landscaping has a careers page referencing open roles."
+        }
+      ],
+      "riskSignals": [],
+      "changeSignals": [
+        {
+          "label": "Ownership change language",
+          "evidence": "Prairie Edge Landscaping references \"new ownership\" or \"under new management\"."
+        }
+      ],
+      "socialLinks": {}
+    },
+    {
+      "name": "Lone Star Turf Pros",
+      "website": "https://lonestarturfdemo.com",
+      "phone": "(304) 555-0114",
+      "address": "148 Main St, Dallas, TX",
+      "websiteScore": 48,
+      "localPresenceScore": 70,
+      "scoreBreakdown": {
+        "seo": 10,
+        "conversion": 12,
+        "trust": 8,
+        "content": 9,
+        "technical": 9
+      },
+      "flags": {
+        "hasTestimonials": true,
+        "hasBookingOrQuote": true,
+        "hasPricingPage": true,
+        "hasBlogOrNewsPage": false,
+        "hasCareersPage": false,
+        "hasSocialLinks": false
+      },
+      "momentumSignals": [],
+      "offerSignals": [],
+      "hiringSignals": [
+        {
+          "label": "Join our team messaging",
+          "evidence": "Lone Star Turf Pros homepage includes \"join our team\" language."
+        }
+      ],
+      "riskSignals": [],
+      "changeSignals": [],
+      "socialLinks": {}
+    },
+    {
+      "name": "Cedar Creek Grounds Care",
+      "website": "https://cedarcreekgroundsdemo.com",
+      "phone": "(305) 555-0115",
+      "address": "160 Main St, Dallas, TX",
+      "websiteScore": 52,
+      "localPresenceScore": 66,
+      "scoreBreakdown": {
+        "seo": 11,
+        "conversion": 12,
+        "trust": 6,
+        "content": 8,
+        "technical": 10
+      },
+      "flags": {
+        "hasTestimonials": true,
+        "hasBookingOrQuote": true,
+        "hasPricingPage": false,
+        "hasBlogOrNewsPage": true,
+        "hasCareersPage": false,
+        "hasSocialLinks": true
+      },
+      "momentumSignals": [],
+      "offerSignals": [],
+      "hiringSignals": [],
+      "riskSignals": [],
+      "changeSignals": [],
+      "socialLinks": {
+        "facebook": "https://facebook.com/cedarcreekgroundsdemo",
+        "instagram": "https://instagram.com/cedarcreekgroundsdemo"
+      }
+    },
+    {
+      "name": "Northgate Yard Solutions",
+      "website": "https://northgateyarddemo.com",
+      "phone": "(306) 555-0116",
+      "address": "172 Main St, Dallas, TX",
+      "websiteScore": 51,
+      "localPresenceScore": 55,
+      "scoreBreakdown": {
+        "seo": 11,
+        "conversion": 10,
+        "trust": 8,
+        "content": 9,
+        "technical": 10
+      },
+      "flags": {
+        "hasTestimonials": true,
+        "hasBookingOrQuote": true,
+        "hasPricingPage": true,
+        "hasBlogOrNewsPage": true,
+        "hasCareersPage": false,
+        "hasSocialLinks": true
+      },
+      "momentumSignals": [],
+      "offerSignals": [
+        {
+          "label": "Free estimate offer",
+          "evidence": "Northgate Yard Solutions advertises a free estimate or quote."
+        }
+      ],
+      "hiringSignals": [],
+      "riskSignals": [],
+      "changeSignals": [],
+      "socialLinks": {
+        "facebook": "https://facebook.com/northgateyarddemo"
+      }
+    },
+    {
+      "name": "Ridgeline Landscape Group",
+      "website": "https://ridgelinelandscapedemo.com",
+      "phone": "(307) 555-0117",
+      "address": "184 Main St, Dallas, TX",
+      "websiteScore": 44,
+      "localPresenceScore": 59,
+      "scoreBreakdown": {
+        "seo": 8,
+        "conversion": 10,
+        "trust": 5,
+        "content": 8,
+        "technical": 10
+      },
+      "flags": {
+        "hasTestimonials": false,
+        "hasBookingOrQuote": true,
+        "hasPricingPage": false,
+        "hasBlogOrNewsPage": false,
+        "hasCareersPage": false,
+        "hasSocialLinks": false
+      },
+      "momentumSignals": [
+        {
+          "label": "New location announced",
+          "evidence": "Ridgeline Landscape Group website references a new service area or location."
+        }
+      ],
+      "offerSignals": [
+        {
+          "label": "24/7 emergency service",
+          "evidence": "Ridgeline Landscape Group advertises 24/7 or emergency availability."
+        }
+      ],
+      "hiringSignals": [],
+      "riskSignals": [
+        {
+          "label": "Service disruption language",
+          "evidence": "Ridgeline Landscape Group mentions a temporary service disruption."
+        }
+      ],
+      "changeSignals": [],
+      "socialLinks": {}
+    },
+    {
+      "name": "Sunbelt Gardens & Design",
+      "website": "https://sunbeltgardensdemo.com",
+      "phone": "(308) 555-0118",
+      "address": "196 Main St, Dallas, TX",
+      "websiteScore": 77,
+      "localPresenceScore": 94,
+      "scoreBreakdown": {
+        "seo": 15,
+        "conversion": 15,
+        "trust": 14,
+        "content": 15,
+        "technical": 10
+      },
+      "flags": {
+        "hasTestimonials": true,
+        "hasBookingOrQuote": true,
+        "hasPricingPage": true,
+        "hasBlogOrNewsPage": true,
+        "hasCareersPage": false,
+        "hasSocialLinks": false
+      },
+      "momentumSignals": [],
+      "offerSignals": [],
+      "hiringSignals": [],
+      "riskSignals": [],
+      "changeSignals": [],
+      "socialLinks": {}
+    },
+    {
+      "name": "Trailhead Landscape Works",
+      "website": "https://trailheadlandscapedemo.com",
+      "phone": "(309) 555-0119",
+      "address": "208 Main St, Dallas, TX",
+      "websiteScore": 94,
+      "localPresenceScore": 41,
+      "scoreBreakdown": {
+        "seo": 18,
+        "conversion": 18,
+        "trust": 13,
+        "content": 18,
+        "technical": 10
+      },
+      "flags": {
+        "hasTestimonials": true,
+        "hasBookingOrQuote": false,
+        "hasPricingPage": false,
+        "hasBlogOrNewsPage": false,
+        "hasCareersPage": true,
+        "hasSocialLinks": true
+      },
+      "momentumSignals": [],
+      "offerSignals": [
+        {
+          "label": "24/7 emergency service",
+          "evidence": "Trailhead Landscape Works advertises 24/7 or emergency availability."
+        }
+      ],
+      "hiringSignals": [],
+      "riskSignals": [],
+      "changeSignals": [
+        {
+          "label": "Rebrand signal",
+          "evidence": "Trailhead Landscape Works site references a rebrand or formerly-known-as name."
+        }
+      ],
+      "socialLinks": {
+        "facebook": "https://facebook.com/trailheadlandscapedemo",
+        "instagram": "https://instagram.com/trailheadlandscapedemo"
+      }
+    }
+  ]
+}

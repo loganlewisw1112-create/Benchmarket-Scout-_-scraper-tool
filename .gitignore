@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# benchmark scout cache
+/.cache/
+
 # production
 /build
 
