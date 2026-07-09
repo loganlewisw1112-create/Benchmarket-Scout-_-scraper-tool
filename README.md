@@ -14,6 +14,18 @@ npm install
 npm run dev
 ```
 
+## Checks
+
+```bash
+npm run lint        # eslint
+npx tsc --noEmit    # typecheck
+npm test            # vitest — offline, deterministic (no network)
+npm run build       # production build (warning-free)
+```
+
+CI (`.github/workflows/ci.yml`) runs the same four checks on every push
+and pull request.
+
 ## Open
 
 http://localhost:3000
@@ -64,9 +76,16 @@ app/
 
 components/                     Dashboard UI building blocks
 lib/                             Pipeline: geocoding, discovery, auditing,
-                                  signal extraction, scoring, report/PDF gen
+                                  signal extraction, scoring, report/PDF gen,
+                                  rate limiting, robots.txt compliance
+lib/*.test.ts                    Vitest suite (offline: SSRF guard, validation,
+                                  scoring, discovery, robots, rate limiting,
+                                  and an end-to-end mock-mode pipeline run)
 data/demo/                       Labeled fallback demo bundles (4 verticals)
 ```
+
+The API route is rate limited (10 requests/minute per client) since each
+analysis fans out to several free public services.
 
 ## Limitations
 
