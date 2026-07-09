@@ -6,7 +6,7 @@ const PAGE_WIDTH = 210;
 const MARGIN = 14;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 
-function sanitizeFilenamePart(value: string): string {
+export function sanitizeFilenamePart(value: string): string {
   return value
     .toLowerCase()
     .trim()
@@ -15,7 +15,7 @@ function sanitizeFilenamePart(value: string): string {
     .replace(/-+/g, "-");
 }
 
-function buildFilename(businessName: string, market: string): string {
+export function buildFilename(businessName: string, market: string): string {
   const date = new Date().toISOString().slice(0, 10);
   const name = sanitizeFilenamePart(businessName);
   const mkt = sanitizeFilenamePart(market);
