@@ -7,6 +7,7 @@ import {
 } from "./discover";
 import { fetchNewsSignals } from "./gdelt";
 import { geocodeMarket } from "./geocode";
+import { logger } from "./logger";
 import { getFullMockBundle, getMockCompetitors, seedToCompetitorReport } from "./mock-data";
 import { generateRecommendations } from "./recommendations";
 import { generateBenchmarkReport } from "./report";
@@ -221,7 +222,14 @@ async function buildMockOnlyResponse(
 export async function analyzeMarket(
   input: ValidatedAnalyzeMarketRequest
 ): Promise<AnalyzeMarketResponse> {
+  const pipelineStartedAt = Date.now();
   const demoMode = resolveDemoMode(input);
+
+  logger.info("analyze-market pipeline started", {
+    businessType: input.businessType,
+    market: input.market,
+    demoMode,
+  });
 
   const cacheKey = JSON.stringify({
     businessName: input.businessName,
@@ -234,6 +242,11 @@ export async function analyzeMarket(
   if (demoMode !== "mock") {
     const cached = await readCache<AnalyzeMarketResponse>("reports", cacheKey);
     if (cached) {
+      logger.info("analyze-market cache hit", {
+        businessType: input.businessType,
+        market: input.market,
+        demoMode,
+      });
       return {
         ...cached,
         dataQuality: { ...cached.dataQuality, cacheHit: true },
@@ -242,7 +255,14 @@ export async function analyzeMarket(
   }
 
   if (demoMode === "mock") {
-    return buildMockOnlyResponse(input);
+    const mockResponse = await buildMockOnlyResponse(input);
+    logger.info("analyze-market pipeline completed", {
+      discoverySource: "mock",
+      usedMockData: true,
+      liveCompetitorsFound: 0,
+      durationMs: Date.now() - pipelineStartedAt,
+    });
+    return mockResponse;
   }
 
   const notes: string[] = [];
@@ -290,6 +310,15 @@ export async function analyzeMarket(
 
   if (competitors.length < MIN_LIVE_COMPETITORS && demoMode !== "live") {
     const needed = TARGET_TOTAL_COMPETITORS - competitors.length;
+    logger.warn(
+      "competitor discovery yielded too few live results; padding with mock competitors",
+      {
+        liveCount: competitors.length,
+        added: needed,
+        businessType: input.businessType,
+        market: input.market,
+      }
+    );
     const mockCompetitors = await getMockCompetitors(input.businessType, needed);
     competitors = [...competitors, ...mockCompetitors];
     usedMockData = true;
@@ -387,6 +416,14 @@ export async function analyzeMarket(
 
   await writeCache("reports", cacheKey, response);
   await writeNamedFile("reports", "latest-success.json", response);
+
+  logger.info("analyze-market pipeline completed", {
+    discoverySource,
+    usedMockData,
+    liveCompetitorsFound,
+    failedHomepageFetches,
+    durationMs: Date.now() - pipelineStartedAt,
+  });
 
   return response;
 }
