@@ -17,14 +17,15 @@ npm run dev
 ## Checks
 
 ```bash
-npm run lint        # eslint
-npx tsc --noEmit    # typecheck
-npm test            # vitest — offline, deterministic (no network)
-npm run build       # production build (warning-free)
+npm run lint          # eslint
+npx tsc --noEmit      # typecheck
+npm test              # vitest — offline, deterministic (no network)
+npm run test:coverage # same suite with a v8 coverage report (report-only)
+npm run build         # production build (warning-free)
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same four checks on every push
-and pull request.
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, test, and build on
+every push and pull request.
 
 ## Open
 
@@ -73,19 +74,32 @@ signals — no LLM is used to generate report content.
 app/
   page.tsx                      Dashboard UI (form, loading, results)
   api/analyze-market/route.ts   POST endpoint running the analysis pipeline
+  api/health/route.ts           GET liveness endpoint (status/uptime/timestamp)
 
 components/                     Dashboard UI building blocks
+components/*.test.tsx            Component tests (happy-dom + Testing Library)
 lib/                             Pipeline: geocoding, discovery, auditing,
                                   signal extraction, scoring, report/PDF gen,
-                                  rate limiting, robots.txt compliance
+                                  rate limiting, robots.txt compliance,
+                                  structured logging (lib/logger.ts)
 lib/*.test.ts                    Vitest suite (offline: SSRF guard, validation,
                                   scoring, discovery, robots, rate limiting,
                                   and an end-to-end mock-mode pipeline run)
+instrumentation.ts               Next.js hooks: startup log + captured-error log
 data/demo/                       Labeled fallback demo bundles (4 verticals)
 ```
 
 The API route is rate limited (10 requests/minute per client) since each
-analysis fans out to several free public services.
+analysis fans out to several free public services. `/api/health` is exempt.
+
+## Observability
+
+Server logs are single-line JSON (`lib/logger.ts`) with per-request
+correlation: every `/api/analyze-market` response carries an `x-request-id`
+header, and all pipeline log lines for that request carry the same id
+(propagated via AsyncLocalStorage — no logger parameter threading). Extend
+logging by importing `logger` from `lib/logger.ts`; wire a real provider
+later by swapping the `console.*` sink in that one file.
 
 ## Limitations
 
