@@ -13,5 +13,12 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["lib/**/*.test.ts"],
+    coverage: {
+      // Report-only: no thresholds enforced (visibility, not a gate).
+      provider: "v8",
+      include: ["lib/**/*.ts", "app/**/*.ts", "app/**/*.tsx", "components/**/*.tsx"],
+      exclude: ["lib/**/*.test.ts", "lib/test-fixtures.ts", "lib/types.ts"],
+      reporter: ["text", "html"],
+    },
   },
 });
