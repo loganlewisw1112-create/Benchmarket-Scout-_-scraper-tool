@@ -1,3 +1,4 @@
+import { logger, serializeError } from "./logger";
 import { getMockCompetitors } from "./mock-data";
 import { queryOverpass, type OverpassElement } from "./overpass";
 import type { CompetitorReport } from "./types";
@@ -169,10 +170,9 @@ export async function discoverCompetitors(args: {
       overpassFailed: false,
     };
   } catch (err) {
-    console.warn(
-      "Overpass discovery failed, falling back to mock competitors:",
-      err instanceof Error ? err.message : err
-    );
+    logger.warn("Overpass discovery failed, falling back to mock competitors", {
+      ...serializeError(err),
+    });
     return { candidates: [], discoverySource: "mock", overpassFailed: true };
   }
 }

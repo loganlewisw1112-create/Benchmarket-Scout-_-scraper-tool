@@ -1,4 +1,5 @@
 import { CACHE_TTL, readCache, writeCache } from "./cache";
+import { logger, serializeError } from "./logger";
 import { MOCK_MARKET_COORDINATES } from "./mock-data";
 
 export type GeocodeResult = {
@@ -76,10 +77,9 @@ export async function geocodeMarket(market: string): Promise<GeocodeResult> {
     }
   }
 
-  console.warn(
-    "Nominatim geocoding failed, falling back to approximate coordinates:",
-    lastError instanceof Error ? lastError.message : lastError
-  );
+  logger.warn("Nominatim geocoding failed, falling back to approximate coordinates", {
+    ...serializeError(lastError),
+  });
 
   return {
     label: `${market} (approximate, fallback data)`,
