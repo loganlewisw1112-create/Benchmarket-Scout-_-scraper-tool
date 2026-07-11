@@ -35,6 +35,5 @@ npm run build       # production build (must be warning-free)
 ## Notes
 
 - This repo pins Next.js 16 — conventions may differ from older Next.js.
-  Consult `node_modules/next/dist/docs/` before assuming an API's behavior
-  (see `AGENTS.md`).
+  Consult `node_modules/next/dist/docs/` before assuming an API's behavior.
 - Never commit `.env.local`, `.cache/`, or `.next/` (all gitignored).

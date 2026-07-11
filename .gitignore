@@ -25,7 +25,19 @@
 
 # misc
 .DS_Store
+Thumbs.db
+ehthumbs.db
 *.pem
+*.local
+
+# editors
+.vscode/
+.idea/
+
+# AI coding-tool artifacts (kept locally, not part of the published project)
+.claude/
+AGENTS.md
+CLAUDE.md
 
 # debug
 npm-debug.log*
