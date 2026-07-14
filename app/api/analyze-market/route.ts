@@ -1,43 +1,35 @@
 import { NextResponse } from "next/server";
 import { analyzeMarket } from "@/lib/analyze-market";
+import { enforceGuard } from "@/lib/api-guard";
 import { logger, serializeError, withRequestId } from "@/lib/logger";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { saveReport } from "@/lib/store";
 import { validateAnalyzeMarketRequest } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function clientKeyFrom(request: Request): string {
-  // First hop of x-forwarded-for when behind a proxy; a shared fallback key
-  // otherwise (single local instance, so this still bounds total throughput).
-  const forwarded = request.headers.get("x-forwarded-for");
-  return forwarded?.split(",")[0]?.trim() || "local";
-}
-
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
 
-  // Everything inside this scope — including the whole lib/ pipeline —
+  // Everything inside this scope, including the whole lib/ pipeline,
   // automatically carries requestId on its structured log lines.
   return withRequestId(requestId, async () => {
     logger.info("analyze-market request received", { method: request.method });
 
-    const rate = checkRateLimit(clientKeyFrom(request));
-    if (!rate.allowed) {
-      logger.warn("analyze-market rate limited", { resetMs: rate.resetMs });
+    const guard = await enforceGuard(request);
+    if (!guard.ok) {
+      logger.warn("analyze-market rejected by guard", {
+        status: guard.status,
+        retryAfterMs: guard.retryAfterMs,
+      });
+      const headers: Record<string, string> = { "x-request-id": requestId };
+      if (guard.retryAfterMs !== undefined) {
+        headers["Retry-After"] = String(Math.ceil(guard.retryAfterMs / 1000));
+      }
       return NextResponse.json(
-        {
-          error:
-            "Too many requests. Each analysis queries several free public services — please wait a minute and try again.",
-        },
-        {
-          status: 429,
-          headers: {
-            "Retry-After": String(Math.ceil(rate.resetMs / 1000)),
-            "x-request-id": requestId,
-          },
-        }
+        { error: guard.error },
+        { status: guard.status, headers }
       );
     }
 
@@ -66,16 +58,27 @@ export async function POST(request: Request) {
 
     try {
       const result = await analyzeMarket(parsed.data);
+
+      // Persist for the shareable read-only view. Best-effort: a store failure
+      // must never turn a successful analysis into an error for the user.
+      let reportId: string | undefined;
+      try {
+        reportId = await saveReport(result);
+      } catch (err) {
+        logger.warn("analyze-market report save failed", serializeError(err));
+      }
+
       logger.info("analyze-market request completed", {
         durationMs: Date.now() - startedAt,
         status: 200,
         usedMockData: result.dataQuality.usedMockData,
         discoverySource: result.dataQuality.discoverySource,
+        reportSaved: reportId !== undefined,
       });
-      return NextResponse.json(result, {
-        status: 200,
-        headers: { "x-request-id": requestId },
-      });
+      return NextResponse.json(
+        { ...result, reportId },
+        { status: 200, headers: { "x-request-id": requestId } }
+      );
     } catch (err) {
       logger.error("analyze-market failed", {
         ...serializeError(err),
