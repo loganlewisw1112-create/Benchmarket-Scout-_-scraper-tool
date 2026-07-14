@@ -218,4 +218,9 @@ export type AnalyzeMarketResponse = {
   dataQuality: DataQuality;
 
   generatedAt: string;
+
+  // Set by the API route after the report is persisted to the durable store.
+  // Enables the shareable read-only view at /r/[reportId]. Absent when the
+  // store is unavailable, so callers must treat it as optional.
+  reportId?: string;
 };

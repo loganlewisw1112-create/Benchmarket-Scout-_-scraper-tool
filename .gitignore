@@ -38,6 +38,7 @@ ehthumbs.db
 .claude/
 AGENTS.md
 CLAUDE.md
+HANDOFF.md
 
 # debug
 npm-debug.log*
@@ -55,3 +56,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# scratch file from sandbox tooling (safe to delete)
+__trunc_test.tmp

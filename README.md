@@ -142,3 +142,24 @@ All are optional; sensible defaults are used if unset.
 > leftover placeholder in unconfigured scrapers, so their WAFs treat it as a
 > signal to reject the request outright (a 403/406 with no useful error
 > body). Use a real contact address instead.
+
+## Hosted deployment (Vercel)
+
+See [DEPLOY.md](./DEPLOY.md) for full steps. In short: provision Vercel KV,
+import the GitHub repo, set `APP_USER_AGENT` (a real contact), `CACHE_DIR=/tmp/.cache`,
+and `DEMO_MODE=auto`, then deploy. Report sharing (`/r/<id>`), waitlist capture
+(`/api/waitlist`), and per-IP rate limiting are wired for a public beta.
+
+### Additional environment variables
+
+- `CACHE_DIR` - set to `/tmp/.cache` on Vercel (read-only project root).
+- `KV_REST_API_URL` / `KV_REST_API_TOKEN` - Vercel KV (Upstash); required for
+  durable saved reports and waitlist. Falls back to the filesystem locally.
+- `SCOUT_API_KEY` - optional shared secret; when set, `/api/analyze-market`
+  and `/api/waitlist` require it via the `x-scout-key` header or `?key=`.
+
+### New endpoints
+
+- `GET /api/reports/[id]` - fetch a saved report as JSON.
+- `POST /api/waitlist` - `{ email, source?, reportId? }`, validated + rate-limited.
+- `GET /r/[id]` - shareable read-only report page.
