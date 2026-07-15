@@ -16,14 +16,6 @@ import type { AnalyzeMarketRequest, AnalyzeMarketResponse } from "@/lib/types";
 
 type ViewState = "form" | "loading" | "results" | "error";
 
-const SAMPLE_REQUEST: AnalyzeMarketRequest = {
-  businessName: "Bright Smile Dental",
-  businessUrl: "https://example-dental.com",
-  businessType: "dentist",
-  market: "Austin, TX",
-  options: { demoMode: "mock" },
-};
-
 export default function Home() {
   const [viewState, setViewState] = useState<ViewState>("form");
   const [result, setResult] = useState<AnalyzeMarketResponse | null>(null);
@@ -66,6 +58,33 @@ export default function Home() {
       setViewState("results");
     } catch {
       setErrorMessage("Could not reach the analysis service. Please try again.");
+      setViewState("error");
+    }
+  }
+
+  async function handleSampleReport() {
+    setViewState("loading");
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch("/api/sample-report", { headers: jsonHeaders() });
+      const json = await res.json();
+
+      if (!res.ok) {
+        if (res.status === 401) setShowKey(true);
+        setErrorMessage(
+          json?.error ?? "Could not generate a sample report. Please try again."
+        );
+        setViewState("error");
+        return;
+      }
+
+      setResult(json as AnalyzeMarketResponse);
+      setViewState("results");
+    } catch {
+      setErrorMessage(
+        "Could not reach the sample report service. Please try again."
+      );
       setViewState("error");
     }
   }
@@ -171,7 +190,7 @@ export default function Home() {
                 </a>
                 <button
                   type="button"
-                  onClick={() => handleSubmit(SAMPLE_REQUEST)}
+                  onClick={handleSampleReport}
                   disabled={viewState === "loading"}
                   className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
                 >

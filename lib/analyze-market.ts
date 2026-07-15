@@ -123,7 +123,7 @@ async function buildLiveCompetitorReport(
   };
 }
 
-function finalizeScores(report: CompetitorReport): void {
+export function finalizeScores(report: CompetitorReport): void {
   report.signals.momentumScore = computeMomentumScore(report.signals);
   report.signals.riskScore = computeRiskScore(report.signals);
   report.signals.changeScore = computeChangeScore(report.signals);
