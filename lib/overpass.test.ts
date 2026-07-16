@@ -49,7 +49,7 @@ describe("queryOverpass", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(queryOverpass("dentist", 30, -97)).rejects.toThrow();
-    expect(fetchMock).toHaveBeenCalledTimes(6); // 3 endpoints x 2 attempts
+    expect(fetchMock).toHaveBeenCalledTimes(4); // 2 endpoints x 2 attempts
   }, 8000);
 
   it("treats a non-JSON response as a failure and retries", async () => {
