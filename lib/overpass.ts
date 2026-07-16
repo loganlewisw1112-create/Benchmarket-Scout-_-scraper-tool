@@ -894,7 +894,6 @@ const USER_AGENT =
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.openstreetmap.ru/api/interpreter",
 ];
 
 const ATTEMPTS_PER_ENDPOINT = 2;
