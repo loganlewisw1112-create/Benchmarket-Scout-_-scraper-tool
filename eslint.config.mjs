@@ -14,6 +14,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Generated coverage report (npm run test:coverage).
     "coverage/**",
+    // Local AI-tooling state, including full repo copies under
+    // .claude/worktrees/ — linting those repeats the whole lint N times.
+    ".claude/**",
   ]),
 ]);
 
