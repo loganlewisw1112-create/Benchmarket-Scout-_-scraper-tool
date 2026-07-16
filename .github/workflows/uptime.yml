@@ -1,0 +1,131 @@
+name: Uptime Monitor
+
+# Runs every 10 minutes (GitHub's cron minimum granularity is 1 minute, but
+# scheduled runs are subject to queueing/jitter under load, so treat this as
+# "about every 10 minutes" rather than exact). workflow_dispatch allows a
+# manual on-demand check.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime-monitor
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  HEALTH_URL: https://benchmarket-scout-scraper-tool.vercel.app/api/health
+  SITE_URL: https://benchmarket-scout-scraper-tool.vercel.app/
+  ISSUE_TITLE: "Production uptime check failing"
+  ISSUE_LABEL: uptime
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check health endpoint
+        id: health
+        run: |
+          set +e
+          body="$(mktemp)"
+          http_code=$(curl -sS --retry 2 --retry-delay 5 --max-time 15 -o "$body" -w '%{http_code}' "$HEALTH_URL")
+          curl_exit=$?
+          echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
+
+          if [ "$curl_exit" -ne 0 ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=curl failed (exit $curl_exit) contacting $HEALTH_URL" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$http_code" != "200" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=Health endpoint returned HTTP $http_code (expected 200)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! status=$(jq -r '.status // empty' "$body" 2>/dev/null); then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=Health endpoint returned a non-JSON body" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -n "$status" ] && [ "$status" != "ok" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=Health endpoint reported status=\"$status\" (expected \"ok\")" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check landing page
+        id: landing
+        run: |
+          set +e
+          http_code=$(curl -sS --retry 2 --retry-delay 5 --max-time 15 -o /dev/null -w '%{http_code}' "$SITE_URL")
+          curl_exit=$?
+          echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
+
+          if [ "$curl_exit" -ne 0 ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=curl failed (exit $curl_exit) contacting $SITE_URL" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$http_code" != "200" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=Landing page returned HTTP $http_code (expected 200)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Find existing uptime issue
+        id: find
+        run: |
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$ISSUE_LABEL" --state open \
+            --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure uptime label exists
+        if: steps.health.outputs.ok == 'false' || steps.landing.outputs.ok == 'false'
+        run: |
+          gh label create "$ISSUE_LABEL" --repo "$GITHUB_REPOSITORY" \
+            --color b60205 --description "Automated production uptime alerts" || true
+
+      - name: Open or update uptime issue
+        if: steps.health.outputs.ok == 'false' || steps.landing.outputs.ok == 'false'
+        run: |
+          health_summary="OK (HTTP ${{ steps.health.outputs.http_code }})"
+          if [ "${{ steps.health.outputs.ok }}" != "true" ]; then
+            health_summary="${{ steps.health.outputs.reason }}"
+          fi
+          landing_summary="OK (HTTP ${{ steps.landing.outputs.http_code }})"
+          if [ "${{ steps.landing.outputs.ok }}" != "true" ]; then
+            landing_summary="${{ steps.landing.outputs.reason }}"
+          fi
+
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          body=$(printf 'Automated uptime check failed at %s.\n\n- Health endpoint (`%s`): %s\n- Landing page (`%s`): %s\n\nWorkflow run: %s' \
+            "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$HEALTH_URL" "$health_summary" "$SITE_URL" "$landing_summary" "$run_url")
+
+          if [ -n "${{ steps.find.outputs.number }}" ]; then
+            gh issue comment "${{ steps.find.outputs.number }}" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body "$body"
+          fi
+
+      - name: Close resolved uptime issue
+        if: steps.health.outputs.ok == 'true' && steps.landing.outputs.ok == 'true' && steps.find.outputs.number != ''
+        run: |
+          gh issue comment "${{ steps.find.outputs.number }}" --repo "$GITHUB_REPOSITORY" \
+            --body "Recovered: both checks passed at $(date -u +"%Y-%m-%dT%H:%M:%SZ")."
+          gh issue close "${{ steps.find.outputs.number }}" --repo "$GITHUB_REPOSITORY" --reason completed
