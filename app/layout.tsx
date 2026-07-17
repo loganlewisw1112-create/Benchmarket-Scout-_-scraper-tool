@@ -12,9 +12,24 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const SITE_NAME = "Benchmark Scout";
+const SITE_DESCRIPTION =
+  "Local competitor intelligence from public web signals.";
+
 export const metadata: Metadata = {
-  title: "Benchmark Scout",
-  description: "Local competitor intelligence from public web signals.",
+  title: SITE_NAME,
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    siteName: SITE_NAME,
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+  },
 };
 
 export default function RootLayout({

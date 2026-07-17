@@ -1,3 +1,5 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ResultsDashboard from "@/components/ResultsDashboard";
@@ -8,13 +10,68 @@ import type { AnalyzeMarketResponse } from "@/lib/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// getReport hits the KV store / filesystem directly (not `fetch`), so it
+// isn't covered by Next's automatic fetch memoization. Wrapping it in React's
+// `cache()` dedupes the lookup between `generateMetadata` and the page
+// component for a single request, avoiding a true double-fetch.
+const getCachedReport = cache(getReport);
+
+const SITE_NAME = "Benchmark Scout";
+
+function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const stored = await getCachedReport(id);
+
+  if (!stored) {
+    return {
+      title: "Report not found",
+      description: `This shared ${SITE_NAME} report is unavailable or may have expired.`,
+    };
+  }
+
+  const data = stored.report as AnalyzeMarketResponse;
+  const businessName = data?.input?.businessName?.trim() || "This business";
+  const marketLabel = data?.market?.label || data?.input?.market || "its market";
+
+  const title =
+    data?.report?.title || `${businessName} Competitor Report | ${SITE_NAME}`;
+  const description = data?.report?.executiveSummary
+    ? truncate(data.report.executiveSummary, 200)
+    : `See how ${businessName} stacks up against local competitors in ${marketLabel}, benchmarked by ${SITE_NAME} from public web signals.`;
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      siteName: SITE_NAME,
+      type: "article",
+    },
+    twitter: {
+      card: "summary",
+      title,
+      description,
+    },
+  };
+}
+
 export default async function SharedReportPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const stored = await getReport(id);
+  const stored = await getCachedReport(id);
   if (!stored) notFound();
 
   const data = stored.report as AnalyzeMarketResponse;
