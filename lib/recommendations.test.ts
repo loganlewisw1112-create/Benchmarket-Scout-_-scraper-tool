@@ -1,71 +1,125 @@
 import { describe, expect, it } from "vitest";
 import { generateRecommendations } from "./recommendations";
-import { makeReport } from "./test-fixtures";
+import type { CompetitorReport, NullableScoreBreakdown } from "./types";
 
-function userWithScores(scoreBreakdown: {
-  seo: number;
-  conversion: number;
-  trust: number;
-  content: number;
-  technical: number;
-}) {
-  return makeReport({
-    name: "You",
-    source: "user",
-    finalScore: 40,
-    websiteAudit: { skipped: false, scoreBreakdown },
-  });
+function report(
+  id: string,
+  breakdown: NullableScoreBreakdown | null
+): CompetitorReport {
+  const available = breakdown !== null;
+  return {
+    id,
+    name: id,
+    source: id === "user" ? "user" : "overpass",
+    sourceIds: [id === "user" ? "S1" : "S2"],
+    auditStatus: available ? "complete" : "unavailable",
+    categoryMatchScore: available ? 100 : null,
+    localPresenceScore: available ? 80 : null,
+    websiteAudit: {
+      auditStatus: available ? "complete" : "unavailable",
+      skipped: !available,
+      sourceIds: available ? ["S1"] : [],
+      h1Count: null,
+      headingCount: null,
+      wordCount: null,
+      ctaCount: null,
+      hasPhone: null,
+      hasEmail: null,
+      hasContactPage: null,
+      hasBookingOrQuote: null,
+      hasPricingPage: null,
+      hasServicesPage: null,
+      hasAboutOrTeamPage: null,
+      hasBlogOrNewsPage: null,
+      hasCareersPage: null,
+      hasTestimonials: null,
+      hasTrustLanguage: null,
+      hasGalleryOrCaseStudy: null,
+      hasSocialLinks: null,
+      hasViewport: null,
+      isHttps: null,
+      htmlBytes: null,
+      fetchMs: null,
+      extractedLinks: [],
+      socialLinks: {},
+      websiteScore: breakdown
+        ? Object.values(breakdown).reduce<number>(
+            (sum, value) => sum + (value ?? 0),
+            0
+          )
+        : null,
+      scoreBreakdown:
+        breakdown ?? {
+          seo: null,
+          conversion: null,
+          trust: null,
+          content: null,
+          technical: null,
+        },
+      evidence: [],
+    },
+    signals: {
+      auditStatus: available ? "complete" : "unavailable",
+      newsStatus: "not_requested",
+      sourceIds: available ? ["S1"] : [],
+      socialLinks: {},
+      momentumSignals: [],
+      riskSignals: [],
+      changeSignals: [],
+      offerSignals: [],
+      hiringSignals: [],
+      newsSignals: [],
+      momentumScore: available ? 0 : null,
+      riskScore: available ? 0 : null,
+      changeScore: available ? 0 : null,
+    },
+    finalScore: available ? 50 : null,
+    rank: null,
+  };
 }
 
 describe("generateRecommendations", () => {
-  it("returns all 5 generic recommendations at medium priority when there are no competitors", () => {
-    const user = userWithScores({ seo: 10, conversion: 10, trust: 10, content: 10, technical: 5 });
-
-    const recs = generateRecommendations({ user, competitors: [] });
-
-    expect(recs).toHaveLength(5);
-    expect(recs.every((r) => r.priority === "medium")).toBe(true);
-    expect(new Set(recs.map((r) => r.title)).size).toBe(5);
+  it("returns no generic recommendations without comparative evidence", () => {
+    const user = report("user", {
+      seo: 10,
+      conversion: 10,
+      trust: 10,
+      content: 10,
+      technical: 5,
+    });
+    expect(generateRecommendations({ user, competitors: [] })).toEqual([]);
+    expect(
+      generateRecommendations({ user: report("user", null), competitors: [user] })
+    ).toEqual([]);
   });
 
-  it("prioritizes gap-based recommendations by gap size", () => {
-    // seo gap 15 (>8 -> high), conversion gap 6 (>4 -> medium), technical gap 1 (<=0.5 excluded)
-    const user = userWithScores({ seo: 5, conversion: 14, trust: 15, content: 15, technical: 9 });
-    const competitor = makeReport({
-      name: "Rival",
-      source: "overpass",
-      finalScore: 80,
-      websiteAudit: { skipped: false, scoreBreakdown: { seo: 20, conversion: 20, trust: 15, content: 15, technical: 9.4 } },
+  it("returns only observed gap recommendations with source IDs", () => {
+    const user = report("user", {
+      seo: 5,
+      conversion: 14,
+      trust: 15,
+      content: 15,
+      technical: 9,
     });
-
-    const recs = generateRecommendations({ user, competitors: [competitor] });
-
-    const seoRec = recs.find((r) => r.title === "Close the on-page SEO gap");
-    const conversionRec = recs.find((r) => r.title === "Close the conversion elements gap");
-
-    expect(seoRec?.priority).toBe("high");
-    expect(conversionRec?.priority).toBe("medium");
-    // Largest gap (seo, 15) should be ordered before the smaller gap (conversion, 6).
-    expect(recs.findIndex((r) => r === seoRec)).toBeLessThan(
-      recs.findIndex((r) => r === conversionRec)
-    );
-  });
-
-  it("fills remaining slots from the generic pool without duplicate titles, capped at 5", () => {
-    // Only one real gap (seo); the rest must come from GENERIC_POOL.
-    const user = userWithScores({ seo: 5, conversion: 20, trust: 15, content: 15, technical: 9 });
-    const competitor = makeReport({
-      name: "Rival",
-      source: "overpass",
-      finalScore: 80,
-      websiteAudit: { skipped: false, scoreBreakdown: { seo: 20, conversion: 20, trust: 15, content: 15, technical: 9 } },
+    const rival = report("rival", {
+      seo: 20,
+      conversion: 20,
+      trust: 15,
+      content: 15,
+      technical: 9,
     });
-
-    const recs = generateRecommendations({ user, competitors: [competitor] });
-
-    expect(recs).toHaveLength(5);
-    expect(recs[0].title).toBe("Close the on-page SEO gap");
-    const titles = recs.map((r) => r.title);
-    expect(new Set(titles).size).toBe(titles.length);
+    const recommendations = generateRecommendations({
+      user,
+      competitors: [rival],
+    });
+    expect(recommendations.map((item) => item.title)).toEqual([
+      "Close the on-page SEO gap",
+      "Close the conversion elements gap",
+    ]);
+    expect(recommendations[0]).toMatchObject({
+      priority: "high",
+      sourceIds: ["S1", "S2"],
+    });
+    expect(recommendations[0].evidence).toContain("across 1 successful audits");
   });
 });

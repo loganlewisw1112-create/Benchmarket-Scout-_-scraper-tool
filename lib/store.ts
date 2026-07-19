@@ -14,19 +14,49 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { assertRealDataResponse } from "./invariants";
 import {
   checkFixedWindowRateLimit,
   inspectFixedWindowRateLimit,
   WINDOW_MS,
 } from "./rate-limit";
+import type { AnalyzeMarketResponse } from "./types";
 
 const REPORT_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
 const ID_PATTERN = /^[A-Za-z0-9_-]{6,64}$/;
+export const KV_REQUEST_TIMEOUT_MS = 1_500;
 
 export type StoredReport = {
+  schemaVersion: 2;
   id: string;
   createdAt: string;
-  report: unknown;
+  report: AnalyzeMarketResponse;
+};
+
+export type ReportReadOutcome =
+  | { status: "ok"; value: StoredReport }
+  | { status: "legacy" }
+  | { status: "missing" }
+  | { status: "invalid" };
+
+export type SampleSnapshotV2 = {
+  schemaVersion: 2;
+  sampleId: string;
+  catalogId: string;
+  reportId: string;
+  generatedAt: string;
+  report: AnalyzeMarketResponse;
+};
+
+export type SampleReadOutcome =
+  | { status: "ok"; value: SampleSnapshotV2 }
+  | { status: "legacy" }
+  | { status: "missing" }
+  | { status: "invalid" };
+
+export type CatalogSampleRead = {
+  catalogId: string;
+  outcome: SampleReadOutcome;
 };
 
 export type WaitlistOutcome = "added" | "exists";
@@ -80,13 +110,23 @@ return {1, current}
 type KvConfig = { url: string; token: string };
 
 function kvConfig(): KvConfig | null {
-  const url =
-    process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL ?? "";
-  const token =
-    process.env.KV_REST_API_TOKEN ??
-    process.env.UPSTASH_REDIS_REST_TOKEN ??
-    "";
-  if (url && token) return { url: url.replace(/\/$/, ""), token };
+  const configurations = [
+    {
+      url: process.env.KV_REST_API_URL?.trim() ?? "",
+      token: process.env.KV_REST_API_TOKEN?.trim() ?? "",
+    },
+    {
+      url: process.env.UPSTASH_REDIS_REST_URL?.trim() ?? "",
+      token: process.env.UPSTASH_REDIS_REST_TOKEN?.trim() ?? "",
+    },
+  ];
+  const configured = configurations.find(({ url, token }) => url && token);
+  if (configured) {
+    return {
+      url: configured.url.replace(/\/$/, ""),
+      token: configured.token,
+    };
+  }
   return null;
 }
 
@@ -105,6 +145,15 @@ export function isDurableStoreConfigured(): boolean {
   return kvConfig() !== null;
 }
 
+function requireDurableStoreForHostedReports(): void {
+  const hosted = process.env.VERCEL === "1" || Boolean(process.env.VERCEL_ENV);
+  if (hosted && !isDurableStoreConfigured()) {
+    throw new Error(
+      "Durable report storage is not configured for this hosted deployment."
+    );
+  }
+}
+
 async function kvCommand(
   cfg: KvConfig,
   command: (string | number)[]
@@ -117,6 +166,7 @@ async function kvCommand(
     },
     body: JSON.stringify(command),
     cache: "no-store",
+    signal: AbortSignal.timeout(KV_REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`KV command failed with HTTP ${res.status}`);
@@ -146,16 +196,23 @@ function storeRoot(): string {
   return path.join(base, "store");
 }
 
-async function fsSaveReport(id: string, payload: string): Promise<void> {
-  const dir = path.join(storeRoot(), "reports");
+async function fsSavePayload(
+  directory: string,
+  id: string,
+  payload: string
+): Promise<void> {
+  const dir = path.join(storeRoot(), directory);
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, `${id}.json`), payload, "utf8");
+  const target = path.join(dir, `${id}.json`);
+  const temporary = `${target}.${crypto.randomBytes(6).toString("hex")}.tmp`;
+  await fs.writeFile(temporary, payload, "utf8");
+  await fs.rename(temporary, target);
 }
 
-async function fsGetReport(id: string): Promise<string | null> {
+async function fsGetPayload(directory: string, id: string): Promise<string | null> {
   try {
     return await fs.readFile(
-      path.join(storeRoot(), "reports", `${id}.json`),
+      path.join(storeRoot(), directory, `${id}.json`),
       "utf8"
     );
   } catch {
@@ -227,40 +284,172 @@ async function fsAdmitWaitlist(
 
 // ---- public API ------------------------------------------------------------
 
-export async function saveReport(report: unknown): Promise<string> {
+function isIsoDate(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function parseStoredReport(raw: string, expectedId: string): ReportReadOutcome {
+  try {
+    const value = JSON.parse(raw) as Partial<StoredReport>;
+    if (
+      value.schemaVersion !== 2 ||
+      value.id !== expectedId ||
+      !isIsoDate(value.createdAt) ||
+      !value.report
+    ) {
+      return { status: "invalid" };
+    }
+    assertRealDataResponse(value.report);
+    return { status: "ok", value: value as StoredReport };
+  } catch {
+    return { status: "invalid" };
+  }
+}
+
+function parseSampleSnapshot(raw: string, catalogId: string): SampleReadOutcome {
+  try {
+    const value = JSON.parse(raw) as Partial<SampleSnapshotV2>;
+    if (
+      value.schemaVersion !== 2 ||
+      value.catalogId !== catalogId ||
+      typeof value.sampleId !== "string" ||
+      !isValidReportId(value.sampleId) ||
+      typeof value.reportId !== "string" ||
+      !isValidReportId(value.reportId) ||
+      !isIsoDate(value.generatedAt) ||
+      !value.report
+    ) {
+      return { status: "invalid" };
+    }
+    assertRealDataResponse(value.report);
+    return { status: "ok", value: value as SampleSnapshotV2 };
+  } catch {
+    return { status: "invalid" };
+  }
+}
+
+export async function saveReport(report: AnalyzeMarketResponse): Promise<string> {
+  assertRealDataResponse(report);
+  requireDurableStoreForHostedReports();
   const id = newReportId();
   const payload = JSON.stringify({
+    schemaVersion: 2,
     id,
     createdAt: new Date().toISOString(),
     report,
   });
   const cfg = kvConfig();
+  if (!cfg && hasAnyKvConfig()) throw new Error("Incomplete KV configuration");
   if (cfg) {
     await kvCommand(cfg, [
       "SET",
-      `report:${id}`,
+      `report:v2:${id}`,
       payload,
       "EX",
       REPORT_TTL_SECONDS,
     ]);
   } else {
-    await fsSaveReport(id, payload);
+    await fsSavePayload("report-v2", id, payload);
   }
   return id;
 }
 
-export async function getReport(id: string): Promise<StoredReport | null> {
-  if (!isValidReportId(id)) return null;
+export async function readReportV2(id: string): Promise<ReportReadOutcome> {
+  requireDurableStoreForHostedReports();
+  if (!isValidReportId(id)) return { status: "missing" };
   const cfg = kvConfig();
+  if (!cfg && hasAnyKvConfig()) throw new Error("Incomplete KV configuration");
   const raw = cfg
+    ? ((await kvCommand(cfg, ["GET", `report:v2:${id}`])) as string | null)
+    : await fsGetPayload("report-v2", id);
+  if (raw) return parseStoredReport(raw, id);
+
+  const legacy = cfg
     ? ((await kvCommand(cfg, ["GET", `report:${id}`])) as string | null)
-    : await fsGetReport(id);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as StoredReport;
-  } catch {
-    return null;
+    : await fsGetPayload("reports", id);
+  return legacy ? { status: "legacy" } : { status: "missing" };
+}
+
+export async function getReport(id: string): Promise<StoredReport | null> {
+  const outcome = await readReportV2(id);
+  return outcome.status === "ok" ? outcome.value : null;
+}
+
+export async function replaceSampleSnapshot(
+  snapshot: SampleSnapshotV2
+): Promise<void> {
+  if (
+    snapshot.schemaVersion !== 2 ||
+    !isValidReportId(snapshot.sampleId) ||
+    !isValidReportId(snapshot.reportId) ||
+    !CATALOG_ID_PATTERN.test(snapshot.catalogId) ||
+    !isIsoDate(snapshot.generatedAt)
+  ) {
+    throw new Error("Invalid v2 sample snapshot envelope.");
   }
+  assertRealDataResponse(snapshot.report);
+  requireDurableStoreForHostedReports();
+  const payload = JSON.stringify(snapshot);
+  const cfg = kvConfig();
+  if (!cfg && hasAnyKvConfig()) throw new Error("Incomplete KV configuration");
+  if (cfg) {
+    await kvCommand(cfg, ["SET", `sample:v2:${snapshot.catalogId}`, payload]);
+  } else {
+    await fsSavePayload("sample-v2", snapshot.catalogId, payload);
+  }
+}
+
+const CATALOG_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export async function readSampleSnapshotsV2(
+  catalogIds: readonly string[]
+): Promise<CatalogSampleRead[]> {
+  requireDurableStoreForHostedReports();
+  const cfg = kvConfig();
+  if (!cfg && hasAnyKvConfig()) throw new Error("Incomplete KV configuration");
+  let current: Array<string | null>;
+  let legacy: Array<string | null>;
+  if (cfg) {
+    if (catalogIds.length === 0) return [];
+    current = (await kvCommand(cfg, [
+      "MGET",
+      ...catalogIds.map((id) => `sample:v2:${id}`),
+    ])) as Array<string | null>;
+    const missingIds = catalogIds.filter((_, index) => !current[index]);
+    const legacyById = new Map<string, string | null>();
+    if (missingIds.length > 0) {
+      const values = (await kvCommand(cfg, [
+        "MGET",
+        ...missingIds.map((id) => `sample:${id}`),
+      ])) as Array<string | null>;
+      missingIds.forEach((id, index) => legacyById.set(id, values[index] ?? null));
+    }
+    legacy = catalogIds.map((id) => legacyById.get(id) ?? null);
+  } else {
+    current = await Promise.all(
+      catalogIds.map((id) => fsGetPayload("sample-v2", id))
+    );
+    legacy = await Promise.all(
+      catalogIds.map((id, index) =>
+        current[index] ? Promise.resolve(null) : fsGetPayload("samples", id)
+      )
+    );
+  }
+
+  return catalogIds.map((catalogId, index) => {
+    if (!CATALOG_ID_PATTERN.test(catalogId)) {
+      return { catalogId, outcome: { status: "invalid" } };
+    }
+    const raw = current[index];
+    return {
+      catalogId,
+      outcome: raw
+        ? parseSampleSnapshot(raw, catalogId)
+        : legacy[index]
+          ? { status: "legacy" }
+          : { status: "missing" },
+    };
+  });
 }
 
 export async function admitWaitlistEmail(

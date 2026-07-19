@@ -1,4 +1,5 @@
 import type { Recommendation } from "@/lib/types";
+import { CitationMarkers } from "./ProvenanceDetails";
 
 function PriorityBadge({ priority }: { priority: Recommendation["priority"] }) {
   const styles = {
@@ -37,7 +38,10 @@ export default function RecommendationPanel({
               </p>
               <PriorityBadge priority={rec.priority} />
             </div>
-            <p className="mt-1 text-xs text-slate-600">{rec.why}</p>
+            <p className="mt-1 text-xs text-slate-600">
+              {rec.why}
+              <CitationMarkers sourceIds={rec.sourceIds} />
+            </p>
             <p className="mt-1.5 text-xs font-medium text-indigo-700">
               Action: {rec.action}
             </p>

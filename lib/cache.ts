@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { assertRealDataResponse } from "./invariants";
+import type { AnalyzeMarketResponse } from "./types";
 
 export type CacheBucket = "geocode" | "reports" | "homepages" | "robots";
 
@@ -14,6 +16,10 @@ function getCacheRoot(): string {
 
 function hashKey(key: string): string {
   return crypto.createHash("sha256").update(key).digest("hex");
+}
+
+function versionedKey(bucket: CacheBucket, key: string): string {
+  return bucket === "reports" ? `report:v2:${key}` : key;
 }
 
 async function ensureDir(dir: string) {
@@ -30,7 +36,10 @@ export async function readCache<T>(
   maxAgeMs?: number
 ): Promise<T | null> {
   try {
-    const file = path.join(bucketDir(bucket), `${hashKey(key)}.json`);
+    const file = path.join(
+      bucketDir(bucket),
+      `${hashKey(versionedKey(bucket, key))}.json`
+    );
     const raw = await fs.readFile(file, "utf8");
     const parsed = JSON.parse(raw) as { savedAt: number; data: T };
 
@@ -38,6 +47,9 @@ export async function readCache<T>(
       return null;
     }
 
+    if (bucket === "reports") {
+      assertRealDataResponse(parsed.data as AnalyzeMarketResponse);
+    }
     return parsed.data;
   } catch {
     return null;
@@ -49,10 +61,16 @@ export async function writeCache<T>(
   key: string,
   data: T
 ): Promise<void> {
+  if (bucket === "reports") {
+    assertRealDataResponse(data as AnalyzeMarketResponse);
+  }
   try {
     const dir = bucketDir(bucket);
     await ensureDir(dir);
-    const file = path.join(dir, `${hashKey(key)}.json`);
+    const file = path.join(
+      dir,
+      `${hashKey(versionedKey(bucket, key))}.json`
+    );
     await fs.writeFile(
       file,
       JSON.stringify({ savedAt: Date.now(), data }, null, 2),
@@ -63,16 +81,34 @@ export async function writeCache<T>(
   }
 }
 
+export async function deleteCache(
+  bucket: CacheBucket,
+  key: string
+): Promise<void> {
+  try {
+    const file = path.join(
+      bucketDir(bucket),
+      `${hashKey(versionedKey(bucket, key))}.json`
+    );
+    await fs.unlink(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
 export async function writeNamedFile(
   bucket: CacheBucket,
   fileName: string,
   data: unknown
 ): Promise<void> {
+  if (bucket === "reports") {
+    assertRealDataResponse(data as AnalyzeMarketResponse);
+  }
   try {
     const dir = bucketDir(bucket);
     await ensureDir(dir);
     await fs.writeFile(
-      path.join(dir, fileName),
+      path.join(dir, bucket === "reports" ? `report-v2-${fileName}` : fileName),
       JSON.stringify(data, null, 2),
       "utf8"
     );

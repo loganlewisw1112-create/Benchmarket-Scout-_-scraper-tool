@@ -24,6 +24,7 @@ export default function HomePage({
 }) {
   const [viewState, setViewState] = useState<ViewState>("form");
   const [result, setResult] = useState<AnalyzeMarketResponse | null>(null);
+  const [currentSampleId, setCurrentSampleId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
   const accessKey = useSyncExternalStore(
@@ -60,6 +61,7 @@ export default function HomePage({
       }
 
       setResult(json as AnalyzeMarketResponse);
+      setCurrentSampleId(null);
       setViewState("results");
     } catch {
       setErrorMessage("Could not reach the analysis service. Please try again.");
@@ -72,23 +74,38 @@ export default function HomePage({
     setErrorMessage(null);
 
     try {
-      const res = await fetch("/api/sample-report", { headers: jsonHeaders() });
+      const query = currentSampleId
+        ? `?exclude=${encodeURIComponent(currentSampleId)}`
+        : "";
+      const res = await fetch(`/api/sample-report${query}`, {
+        headers: jsonHeaders(),
+      });
       const json = await res.json();
 
       if (!res.ok) {
         if (res.status === 401) setShowKey(true);
         setErrorMessage(
-          json?.error ?? "Could not generate a sample report. Please try again."
+          json?.error ?? "Could not load a real sample report. Please try again."
         );
         setViewState("error");
         return;
       }
 
-      setResult(json as AnalyzeMarketResponse);
+      if (!json?.report || typeof json?.sampleId !== "string") {
+        setErrorMessage("The real sample response was incomplete. Please try again.");
+        setViewState("error");
+        return;
+      }
+
+      setResult({
+        ...(json.report as AnalyzeMarketResponse),
+        reportId: json.reportId ?? json.report.reportId,
+      });
+      setCurrentSampleId(json.sampleId);
       setViewState("results");
     } catch {
       setErrorMessage(
-        "Could not reach the sample report service. Please try again."
+        "Could not reach the real sample service. Please try again."
       );
       setViewState("error");
     }
@@ -201,7 +218,7 @@ export default function HomePage({
                   disabled={viewState === "loading"}
                   className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
                 >
-                  See a sample report
+                  See a real sample report
                 </button>
               </div>
             </div>
@@ -274,10 +291,11 @@ export default function HomePage({
             nearby businesses from OpenStreetMap/Overpass, audits public
             homepages for SEO/conversion/trust/content/technical signals, scans
             for public momentum, risk, offer, and hiring language, and checks
-            GDELT for public news mentions. When free public data is sparse,
-            labeled fallback demo rows are used so results stay available.
-            Nothing here accesses private accounts, bypasses logins, or scrapes
-            paywalled/CAPTCHA-protected content.
+            GDELT for public news mentions. Sparse or unavailable evidence is
+            shown honestly as N/A; it is never filled with simulated data.
+            Every report includes its source appendix. Nothing here accesses
+            private accounts, bypasses logins, or scrapes paywalled or
+            CAPTCHA-protected content.
           </p>
           <p className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
             <a

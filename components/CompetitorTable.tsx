@@ -1,13 +1,6 @@
 import type { CompetitorReport } from "@/lib/types";
 
 function SourceBadge({ source }: { source: CompetitorReport["source"] }) {
-  if (source === "mock") {
-    return (
-      <span className="inline-block rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-[11px] font-medium text-purple-700">
-        Fallback demo row
-      </span>
-    );
-  }
   if (source === "user") {
     return (
       <span className="inline-block rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
@@ -22,6 +15,10 @@ function SourceBadge({ source }: { source: CompetitorReport["source"] }) {
   );
 }
 
+function metric(value: number | null): string {
+  return value === null ? "N/A" : String(value);
+}
+
 export default function CompetitorTable({
   user,
   competitors,
@@ -29,9 +26,12 @@ export default function CompetitorTable({
   user: CompetitorReport;
   competitors: CompetitorReport[];
 }) {
-  const rows = [user, ...competitors].sort(
-    (a, b) => (a.rank ?? 99) - (b.rank ?? 99)
-  );
+  const rows = [user, ...competitors].sort((a, b) => {
+    if (a.rank === null && b.rank === null) return 0;
+    if (a.rank === null) return 1;
+    if (b.rank === null) return -1;
+    return a.rank - b.rank;
+  });
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -64,10 +64,17 @@ export default function CompetitorTable({
               className={c.source === "user" ? "bg-indigo-50/50" : undefined}
             >
               <td className="px-4 py-2.5 font-medium text-slate-700">
-                #{c.rank}
+                {c.rank === null ? "N/A" : `#${c.rank}`}
               </td>
               <td className="px-4 py-2.5">
                 <div className="font-medium text-slate-900">{c.name}</div>
+                {c.auditStatus !== "complete" && (
+                  <div className="mt-0.5 text-[11px] font-medium text-amber-700">
+                    {c.auditStatus === "unavailable"
+                      ? "Discovered; website audit unavailable"
+                      : "Website audit partial"}
+                  </div>
+                )}
                 {c.website && (
                   <div className="truncate text-xs text-slate-400 max-w-[220px]">
                     {c.website}
@@ -78,19 +85,19 @@ export default function CompetitorTable({
                 <SourceBadge source={c.source} />
               </td>
               <td className="px-4 py-2.5 text-slate-700">
-                {c.websiteAudit.websiteScore}
+                {metric(c.websiteAudit.websiteScore)}
               </td>
               <td className="px-4 py-2.5 text-slate-700">
-                {c.localPresenceScore}
+                {metric(c.localPresenceScore)}
               </td>
               <td className="px-4 py-2.5 text-slate-700">
-                {c.signals.momentumScore}
+                {metric(c.signals.momentumScore)}
               </td>
               <td className="px-4 py-2.5 text-slate-700">
-                {c.signals.riskScore}
+                {metric(c.signals.riskScore)}
               </td>
               <td className="px-4 py-2.5 font-semibold text-slate-900">
-                {c.finalScore}
+                {metric(c.finalScore)}
               </td>
             </tr>
           ))}

@@ -1,76 +1,102 @@
-# Deploying Benchmark Scout to Vercel
+# Benchmark Scout v0.4.0 release runbook
 
-Standard Next.js project. Vercel auto-detects the framework (no `vercel.json`
-needed). This deploys a **gated** public beta: reports run behind a shared
-access code, plus per-IP rate limiting, with report sharing and waitlist
-capture.
+This release is maintenance-first and fail-closed. Rollback always restores
+maintenance; it never reopens the v0.3.1 synthetic-report paths.
 
-## 1. One-time: clear the stale git lock, drop line-ending noise, commit + push
+## 1. Contain production
 
-A stale `.git/index.lock` (0 bytes, from a crashed process on Jul 12) is
-blocking commits. In the `Scraper` folder on your machine:
+Set `MAINTENANCE_MODE=true` for Production and deploy before changing the
+pipeline. Verify:
+
+- `/` and `/r/<any-id>` show the branded maintenance page.
+- analysis, sample, and stored-report APIs return `503 MAINTENANCE`.
+- `/api/health` returns `200` with `maintenance:true`.
+
+Delete `DEMO_MODE` from every Vercel environment. Do not restore it during a
+rollback.
+
+## 2. Required environment
+
+Configure Production and Preview as appropriate:
+
+| Variable | Value | Purpose |
+|---|---|---|
+| `MAINTENANCE_MODE` | `true` in Production until launch | Fail-closed release gate. |
+| `APP_USER_AGENT` | A real product/contact identifier | Required by Nominatim and Overpass. |
+| `CACHE_DIR` | `/tmp/.cache` | Writable Vercel cache path. |
+| `STRICT_ROBOTS` | `true` | Respect robots directives. |
+| `KV_REST_API_URL` | Vercel/Upstash value | Durable v2 reports and samples. |
+| `KV_REST_API_TOKEN` | Vercel/Upstash value | Durable v2 reports and samples. |
+| `SAMPLE_REFRESH_SECRET` | Long random secret | Protect sample refresh. |
+
+The same `SAMPLE_REFRESH_SECRET` must be stored as a GitHub Actions repository
+secret for the daily refresh workflow. Never write it to source, logs, or
+workflow output.
+
+## 3. CI and preview gate
+
+Run locally and in CI:
 
 ```powershell
-del .git\index.lock
-# drop pre-existing CRLF/LF churn so the feature diff stays clean:
-git checkout -- package.json package-lock.json .github/workflows/ci.yml
-git add -A
-git commit -m "feat: gated hosted beta - report sharing, waitlist, key gate, landing page"
-git tag v0.2.0
-git push origin HEAD --tags
+npm ci
+npm run check:real-data-only
+npm test
+npx tsc --noEmit
+npm run lint
+npm run build
 ```
 
-CI (lint + typecheck + test + build) runs on push and must be green before you
-promote the deployment.
+Deploy a gated Vercel Preview. Run the curated 25 Alameda County inputs at
+least 65 seconds apart. Each successful run must persist and render through a
+working share URL. Bounded retries are allowed only for typed retryable source
+outages.
 
-## 2. Generate the access code + its hash
+If Vercel Deployment Protection is enabled, create a temporary project
+automation bypass and provide it only to the gate process as
+`VERCEL_AUTOMATION_BYPASS_SECRET`. The gate sends it as the documented
+`x-vercel-protection-bypass` header on analysis, stored-report, and shared-page
+requests. Revoke the temporary bypass after preview validation.
 
-```
-node -e "const c=require('crypto');const k=c.randomBytes(24).toString('base64url');console.log('ACCESS CODE (share with beta users):',k);console.log('SCOUT_API_KEY_HASH (set in Vercel):',c.createHash('sha256').update(k).digest('hex'))"
-```
+Validate every produced report:
 
-Keep the ACCESS CODE to hand out; only the hash goes into Vercel. Beta users
-paste the code into the "Access code" field on the site (stored on their
-device, sent as the `x-scout-key` header).
+- `schemaVersion` is `2` and provenance policy is `real-only`.
+- `containsSyntheticData` is exactly `false`.
+- every `sourceId` resolves and the Sources Appendix is complete.
+- unavailable fields render as `N/A`; unaudited competitors are unscored.
+- no modeled uplift, mock source, demo text, zero padding, or approximate
+  coordinates appear.
+- old/non-v2 reports return `410 LEGACY_REPORT_UNAVAILABLE`.
 
-## 3. Provision Vercel KV (durable share links + waitlist)
+Render all 25 share pages. Verify PDF output on at least five representative
+complete and partial reports.
 
-Vercel dashboard: **Storage -> Create -> KV (Upstash Redis)**, connect to this
-project. `KV_REST_API_URL` and `KV_REST_API_TOKEN` are injected automatically.
-Without KV, saved reports fall back to ephemeral `/tmp` and share links break
-across instances.
+## 4. Real sample gate
 
-## 4. Import the project and set environment variables
+Refresh candidates sequentially through `POST /api/sample-report/refresh`
+using header `x-sample-refresh-secret` and body `{ "catalogId": "..." }`.
+Only snapshots passing the sample quality gate can become active: successful
+user audit, at least six real competitors, at least three successful
+competitor audits, complete source resolution, and zero provenance violations.
 
-Import `github.com/loganlewisw1112-create/Benchmarket-Scout-_-scraper-tool`
-(**Add New -> Project**). Set (Production + Preview):
+Before launch, require exactly 12 active distinct-industry snapshots. Confirm
+sample rotation, exclusion of the current sample, oldest age below 72 hours,
+and health alerts below 10 active samples or above 72 hours.
 
-| Variable | Value | Why |
-|---|---|---|
-| `APP_USER_AGENT` | `BenchmarkScout/1.0 (contact: github.com/loganlewisw1112-create/Benchmarket-Scout-_-scraper-tool)` | Nominatim/Overpass reject example.com. Use a real, reachable contact. |
-| `SCOUT_API_KEY_HASH` | (hash from step 2) | Gates the beta; raw code never stored server-side. |
-| `DEMO_MODE` | `auto` | Live public data first, labeled fallback when sparse. |
-| `CACHE_DIR` | `/tmp/.cache` | Project root is read-only on Vercel; only `/tmp` is writable. |
-| `STRICT_ROBOTS` | `true` | Respect robots.txt on a public deployment. |
-| `KV_REST_API_URL` | (auto, step 3) | Durable report/waitlist store. |
-| `KV_REST_API_TOKEN` | (auto, step 3) | Durable report/waitlist store. |
+## 5. Production cutover
 
-To open the beta to everyone later, just remove `SCOUT_API_KEY_HASH`.
+1. Merge the green release and tag `v0.4.0`.
+2. Deploy Production with maintenance still enabled.
+3. Re-run health and containment probes.
+4. Remove or set `MAINTENANCE_MODE=false`, then redeploy once.
+5. Run six production smoke reports plus sample rotation, share/OG metadata,
+   Sources Appendix, PDF, health, and runtime-log checks.
 
-## 5. Deploy and verify
+Launch remains blocked for synthetic provenance, unresolved sources,
+accessible legacy reports, fewer than 12 active launch samples, any CI failure,
+timeouts without a successful bounded retry, or production 5xx responses.
 
-On the live URL:
+## 6. Rollback
 
-- Landing page renders; entering the access code, then **See a sample report**,
-  returns results (without a valid code, analyze returns HTTP 401).
-- A real report shows a **Share this report** link; opening `/r/<id>` in a
-  fresh browser shows the same report.
-- Waitlist email returns success; a duplicate reports "already on the list".
-- Rapid repeated analyze calls eventually return HTTP 429.
-- `/api/health` returns `{ "status": "ok" }`.
-
-## Notes
-
-- Node: CI uses Node 24; set Vercel **Node.js Version** to 22.x or 24.x.
-- Rate limit: 10 requests / 60s per IP (`lib/rate-limit.ts`), enforced across
-  instances via KV when configured.
+Immediately set `MAINTENANCE_MODE=true` and redeploy. Keep monitoring available
+through `/api/health`. Diagnose and repair v0.4.x behind maintenance; never
+redeploy or reopen v0.3.1.

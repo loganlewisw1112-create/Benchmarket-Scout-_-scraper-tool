@@ -1,118 +1,309 @@
 // @vitest-environment happy-dom
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { generateRecommendations } from "@/lib/recommendations";
-import { generateBenchmarkReport } from "@/lib/report";
-import { buildMarketSummary, rankCompetitors } from "@/lib/scoring";
-import { makeReport } from "@/lib/test-fixtures";
 import type {
-  AnalyzeMarketRequest,
   AnalyzeMarketResponse,
-  DataQuality,
+  CompetitorReport,
+  Recommendation,
+  WebsiteAudit,
 } from "@/lib/types";
 import ResultsDashboard from "./ResultsDashboard";
 
-// Assemble a full response through the real (pure, already-tested) pipeline
-// pieces so the fixture always matches what production hands the dashboard.
-function buildResponse(): AnalyzeMarketResponse {
-  const input: AnalyzeMarketRequest = {
-    businessName: "Verify Dental",
-    businessUrl: "https://verify-dental.example.org",
-    businessType: "dentist",
-    market: "Austin, TX",
+function audit(
+  overrides: Partial<WebsiteAudit> = {}
+): WebsiteAudit {
+  return {
+    auditStatus: "complete",
+    skipped: false,
+    sourceIds: ["S3"],
+    h1Count: 1,
+    headingCount: 4,
+    wordCount: 420,
+    ctaCount: 2,
+    hasPhone: true,
+    hasEmail: true,
+    hasContactPage: true,
+    hasBookingOrQuote: true,
+    hasPricingPage: false,
+    hasServicesPage: true,
+    hasAboutOrTeamPage: true,
+    hasBlogOrNewsPage: false,
+    hasCareersPage: false,
+    hasTestimonials: true,
+    hasTrustLanguage: true,
+    hasGalleryOrCaseStudy: false,
+    hasSocialLinks: false,
+    hasViewport: true,
+    isHttps: true,
+    htmlBytes: 42_000,
+    fetchMs: 220,
+    extractedLinks: [],
+    socialLinks: {},
+    websiteScore: 68,
+    scoreBreakdown: {
+      seo: 18,
+      conversion: 17,
+      trust: 13,
+      content: 12,
+      technical: 8,
+    },
+    evidence: [],
+    ...overrides,
   };
+}
 
-  const user = makeReport({
+function competitor(
+  overrides: Partial<CompetitorReport> = {}
+): CompetitorReport {
+  return {
+    id: "verify-dental",
     name: "Verify Dental",
+    website: "https://verify-dental.example.org",
     source: "user",
-    finalScore: 55,
-    website: input.businessUrl,
-  });
-  const rivalA = makeReport({
-    name: "Rival Alpha Dental",
-    source: "mock",
-    finalScore: 72,
-  });
-  const rivalB = makeReport({
-    name: "Rival Beta Dental",
-    source: "mock",
-    finalScore: 41,
+    sourceIds: ["S1", "S3"],
+    auditStatus: "complete",
+    categoryMatchScore: 100,
+    localPresenceScore: 70,
+    websiteAudit: audit(),
+    signals: {
+      auditStatus: "complete",
+      newsStatus: "not_requested",
+      sourceIds: ["S3"],
+      socialLinks: {},
+      momentumSignals: [
+        {
+          label: "New patient offer",
+          evidence: "Homepage advertises a new-patient promotion.",
+          sourceUrl: "https://verify-dental.example.org",
+          sourceType: "homepage",
+          sourceIds: ["S3"],
+          confidence: "high",
+        },
+      ],
+      riskSignals: [],
+      changeSignals: [],
+      offerSignals: [],
+      hiringSignals: [],
+      newsSignals: [],
+      momentumScore: 15,
+      riskScore: 0,
+      changeScore: 0,
+    },
+    finalScore: 64,
+    rank: 1,
+    ...overrides,
+  };
+}
+
+function buildResponse(): AnalyzeMarketResponse {
+  const user = competitor();
+  const unaudited = competitor({
+    id: "rival-unavailable",
+    name: "Rival Dental (discovered only)",
+    website: undefined,
+    source: "overpass",
+    sourceIds: ["S2"],
+    auditStatus: "unavailable",
+    categoryMatchScore: null,
+    localPresenceScore: null,
+    websiteAudit: audit({
+      auditStatus: "unavailable",
+      skipped: true,
+      reason: "No public website was discoverable.",
+      sourceIds: ["S2"],
+      h1Count: null,
+      headingCount: null,
+      wordCount: null,
+      ctaCount: null,
+      hasPhone: null,
+      hasEmail: null,
+      hasContactPage: null,
+      hasBookingOrQuote: null,
+      hasPricingPage: null,
+      hasServicesPage: null,
+      hasAboutOrTeamPage: null,
+      hasBlogOrNewsPage: null,
+      hasCareersPage: null,
+      hasTestimonials: null,
+      hasTrustLanguage: null,
+      hasGalleryOrCaseStudy: null,
+      hasSocialLinks: null,
+      hasViewport: null,
+      isHttps: null,
+      htmlBytes: null,
+      fetchMs: null,
+      websiteScore: null,
+      scoreBreakdown: {
+        seo: null,
+        conversion: null,
+        trust: null,
+        content: null,
+        technical: null,
+      },
+    }),
+    signals: {
+      auditStatus: "unavailable",
+      newsStatus: "not_requested",
+      sourceIds: ["S2"],
+      socialLinks: {},
+      momentumSignals: [],
+      riskSignals: [],
+      changeSignals: [],
+      offerSignals: [],
+      hiringSignals: [],
+      newsSignals: [],
+      momentumScore: null,
+      riskScore: null,
+      changeScore: null,
+    },
+    finalScore: null,
+    rank: null,
   });
 
-  const ranked = rankCompetitors(user, [rivalA, rivalB]);
-  const summary = buildMarketSummary(ranked.user, ranked.competitors);
-  const recommendations = generateRecommendations({
-    user: ranked.user,
-    competitors: ranked.competitors,
-  });
-  const dataQuality: DataQuality = {
-    discoverySource: "mock",
-    usedMockData: true,
-    liveCompetitorsFound: 0,
-    failedHomepageFetches: 0,
-    limitedAudits: 0,
-    cacheHit: false,
-    notes: ["Mock demo mode is active for this test render."],
+  const recommendation: Recommendation = {
+    title: "Strengthen service detail",
+    why: "The audited homepage has limited service detail.",
+    action: "Publish a service page.",
+    evidence: "Homepage audit.",
+    sourceIds: ["S3"],
+    priority: "high",
   };
-  const report = generateBenchmarkReport({
-    input,
-    user: ranked.user,
-    competitors: ranked.competitors,
-    summary,
-    recommendations,
-    dataQuality,
-  });
 
   return {
-    input,
-    market: { label: "Austin, TX (mock mode)", source: "mock" },
-    user: ranked.user,
-    competitors: ranked.competitors,
-    summary,
-    report,
-    recommendations,
-    dataQuality,
-    generatedAt: new Date().toISOString(),
+    schemaVersion: 2,
+    provenance: {
+      policy: "real-only",
+      containsSyntheticData: false,
+      sources: [
+        {
+          id: "S1",
+          kind: "user_input",
+          provider: "Submitted request",
+          title: "Verify Dental request",
+          businessName: "Verify Dental",
+          accessedAt: "2026-07-19T08:00:00.000Z",
+          status: "used",
+        },
+        {
+          id: "S2",
+          kind: "openstreetmap",
+          provider: "OpenStreetMap",
+          title: "Austin dentist discovery",
+          url: "https://overpass-api.de/api/interpreter",
+          accessedAt: "2026-07-19T08:00:01.000Z",
+          status: "used",
+        },
+        {
+          id: "S3",
+          kind: "homepage",
+          provider: "Public website",
+          title: "Verify Dental homepage",
+          businessName: "Verify Dental",
+          url: "https://verify-dental.example.org/",
+          accessedAt: "2026-07-19T08:00:02.000Z",
+          status: "used",
+        },
+      ],
+    },
+    input: {
+      businessName: "Verify Dental",
+      businessUrl: "https://verify-dental.example.org",
+      businessType: "dentist",
+      market: "Austin, TX",
+    },
+    market: {
+      label: "Austin, TX",
+      lat: 30.2672,
+      lon: -97.7431,
+      source: "nominatim",
+      sourceIds: ["S2"],
+    },
+    user,
+    competitors: [unaudited],
+    summary: {
+      competitorCount: 1,
+      auditedCompetitorCount: 0,
+      competitorAverageWebsiteScore: null,
+      competitorAverageFinalScore: null,
+      yourRank: null,
+      marketGap: null,
+      status: null,
+    },
+    report: {
+      title: "Benchmark Scout Report — Verify Dental (Austin, TX)",
+      executiveSummary: "A real-data-only benchmark with limited comparison evidence.",
+      positionStatement: "A verified score is available only for the submitted business.",
+      topFindings: [
+        {
+          title: "Homepage offer",
+          finding: "A new-patient offer is visible.",
+          evidence: "Homepage content.",
+          implication: "Keep it current.",
+          sourceIds: ["S3"],
+          confidence: "high",
+        },
+      ],
+      topRisks: [
+        {
+          title: "Comparison coverage",
+          finding: "The discovered competitor could not be audited.",
+          evidence: "Discovery and website lookup.",
+          implication: "Do not infer a competitor score.",
+          sourceIds: ["S2"],
+          confidence: "high",
+        },
+      ],
+      competitorHighlights: [],
+      actionPlan: [recommendation],
+      methodologyNote: "Real public sources only.",
+      dataQualityNote: "One discovered competitor remained unaudited.",
+    },
+    recommendations: [recommendation],
+    dataQuality: {
+      coverageStatus: "partial",
+      realCompetitorsFound: 1,
+      scoredCompetitors: 0,
+      failedAudits: 0,
+      limitedAudits: 1,
+      unavailableFields: ["competitors[0].finalScore"],
+      cacheHit: false,
+      notes: ["One discovered competitor remained unaudited."],
+    },
+    generatedAt: "2026-07-19T08:00:03.000Z",
   };
 }
 
 describe("ResultsDashboard", () => {
-  it("renders every dashboard section from a full pipeline response", () => {
-    const data = buildResponse();
-    render(<ResultsDashboard data={data} />);
+  it("keeps discovered unaudited competitors visible and renders unavailable metrics as N/A", () => {
+    render(<ResultsDashboard data={buildResponse()} />);
 
-    // Section heading owned by ResultsDashboard itself.
-    expect(screen.getByText("Local Competitor Landscape")).toBeInTheDocument();
-
-    // Competitor table rows (names may also appear in report highlights).
+    expect(screen.getByText("Rival Dental (discovered only)")).toBeInTheDocument();
     expect(
-      screen.getAllByText(/Rival Alpha Dental/).length
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Rival Beta Dental/).length).toBeGreaterThan(0);
-
-    // The user's business shows up in the landscape.
-    expect(screen.getAllByText(/Verify Dental/).length).toBeGreaterThan(0);
-
-    // Data-quality note surfaces (banner and/or report data-quality note).
-    expect(
-      screen.getAllByText("Mock demo mode is active for this test render.")
-        .length
-    ).toBeGreaterThan(0);
-
-    // Recommendations render (panel and/or report action plan).
-    expect(
-      screen.getAllByText(data.recommendations[0].title).length
-    ).toBeGreaterThan(0);
+      screen.getByText("Discovered; website audit unavailable")
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("N/A").length).toBeGreaterThan(4);
   });
 
-  it("renders rank and score information for the ranked market", () => {
-    const data = buildResponse();
-    render(<ResultsDashboard data={data} />);
+  it("renders citation markers and the complete embedded sources appendix", () => {
+    render(<ResultsDashboard data={buildResponse()} />);
 
-    // User finalScore 55 ranks #2 of 3 (72 > 55 > 41).
-    expect(data.user.rank).toBe(2);
-    // The final scores appear somewhere in the dashboard output.
-    expect(screen.getAllByText(/72/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/55/).length).toBeGreaterThan(0);
+    expect(screen.getByText("Sources Appendix")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Sources S3").length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText("Sources S2").length).toBeGreaterThan(0);
+    expect(screen.getByText("Verify Dental request")).toBeInTheDocument();
+    expect(screen.getByText("Austin dentist discovery")).toBeInTheDocument();
+    expect(screen.getByText("Verify Dental homepage")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", {
+        name: "https://verify-dental.example.org/",
+      })
+    ).toHaveAttribute("href", "https://verify-dental.example.org/");
+  });
+
+  it("describes the report as real-only and never claims fallback data", () => {
+    render(<ResultsDashboard data={buildResponse()} />);
+
+    expect(screen.getByText(/real public data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/fallback demo/i)).not.toBeInTheDocument();
   });
 });

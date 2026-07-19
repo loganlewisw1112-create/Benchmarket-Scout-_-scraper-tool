@@ -16,6 +16,7 @@ Run all of these before committing — CI runs the same set:
 npm run lint        # eslint
 npx tsc --noEmit    # typecheck
 npm test            # vitest (offline, deterministic)
+npm run check:real-data-only
 npm run build       # production build (must be warning-free)
 ```
 
@@ -28,8 +29,14 @@ npm run build       # production build (must be warning-free)
 - New pipeline logic belongs in `lib/`; UI in `components/`; keep the API route
   (`app/api/analyze-market/route.ts`) thin.
 - Tests must run offline — no test may depend on Nominatim, Overpass, GDELT,
-  or any live website. Use `demoMode: "mock"` and unroutable/private URLs
-  (e.g. `https://127.0.0.1`) to force deterministic paths.
+  or any live website. Network test doubles are allowed only in test files.
+- Test doubles must never be serialized into a report, saved, cached, or
+  accepted by the v2 provenance validator.
+- Unavailable observations are represented by `null`/`N/A`; never add zero
+  padding, synthetic competitors, approximate coordinates, projected uplift,
+  or unsupported generic recommendations.
+- Every production finding, risk, recommendation, signal, and competitor must
+  resolve its `sourceIds` in the report's Sources Appendix.
 - Commit messages: short imperative subject; body explains why when non-obvious.
 
 ## Notes

@@ -1,128 +1,120 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeChangeScore,
+  buildMarketSummary,
+  computeCategoryComparisons,
   computeFinalScore,
-  computeLocalPresenceScore,
-  computeMomentumScore,
-  computeRiskScore,
   rankCompetitors,
-  statusForScore,
 } from "./scoring";
-import { makeReport, makeSignalList, makeSignals } from "./test-fixtures";
+import type { CompetitorReport } from "./types";
 
-describe("computeFinalScore", () => {
-  it("weights website 60%, presence 20%, momentum 15%, inverse risk 5%", () => {
+function report(id: string, finalScore: number | null): CompetitorReport {
+  const available = finalScore !== null;
+  return {
+    id,
+    name: id,
+    source: id === "user" ? "user" : "overpass",
+    sourceIds: ["S1"],
+    auditStatus: available ? "complete" : "unavailable",
+    categoryMatchScore: available ? 80 : null,
+    localPresenceScore: available ? 70 : null,
+    websiteAudit: {
+      auditStatus: available ? "complete" : "unavailable",
+      skipped: !available,
+      sourceIds: available ? ["S1"] : [],
+      h1Count: available ? 1 : null,
+      headingCount: available ? 3 : null,
+      wordCount: available ? 300 : null,
+      ctaCount: available ? 1 : null,
+      hasPhone: available,
+      hasEmail: available,
+      hasContactPage: available,
+      hasBookingOrQuote: available,
+      hasPricingPage: false,
+      hasServicesPage: available,
+      hasAboutOrTeamPage: available,
+      hasBlogOrNewsPage: false,
+      hasCareersPage: false,
+      hasTestimonials: available,
+      hasTrustLanguage: available,
+      hasGalleryOrCaseStudy: false,
+      hasSocialLinks: false,
+      hasViewport: available,
+      isHttps: available,
+      htmlBytes: available ? 1000 : null,
+      fetchMs: available ? 100 : null,
+      extractedLinks: [],
+      socialLinks: {},
+      websiteScore: available ? 50 : null,
+      scoreBreakdown: available
+        ? { seo: 10, conversion: 15, trust: 10, content: 10, technical: 5 }
+        : { seo: null, conversion: null, trust: null, content: null, technical: null },
+      evidence: [],
+    },
+    signals: {
+      auditStatus: available ? "complete" : "unavailable",
+      newsStatus: "not_requested",
+      sourceIds: available ? ["S1"] : [],
+      socialLinks: {},
+      momentumSignals: [],
+      riskSignals: [],
+      changeSignals: [],
+      offerSignals: [],
+      hiringSignals: [],
+      newsSignals: [],
+      momentumScore: available ? 0 : null,
+      riskScore: available ? 0 : null,
+      changeScore: available ? 0 : null,
+    },
+    finalScore,
+    rank: null,
+  };
+}
+
+describe("observed-data scoring", () => {
+  it("returns null when any required score is unavailable", () => {
     expect(
       computeFinalScore({
-        websiteScore: 100,
-        localPresenceScore: 100,
-        momentumScore: 100,
+        websiteScore: null,
+        localPresenceScore: 50,
+        momentumScore: 0,
         riskScore: 0,
       })
-    ).toBe(100);
-
-    expect(
-      computeFinalScore({
-        websiteScore: 50,
-        localPresenceScore: 80,
-        momentumScore: 20,
-        riskScore: 40,
-      })
-    ).toBe(52); // 30 + 16 + 3 + 3
-
-    expect(
-      computeFinalScore({
-        websiteScore: 0,
-        localPresenceScore: 0,
-        momentumScore: 0,
-        riskScore: 100,
-      })
-    ).toBe(0);
-  });
-});
-
-describe("computeLocalPresenceScore", () => {
-  it("caps at 100 with everything present", () => {
-    expect(
-      computeLocalPresenceScore({
-        hasWebsite: true,
-        hasPhoneOrEmail: true,
-        hasAddressOrCoords: true,
-        categoryMatch: true,
-        osmCompleteness: 1,
-      })
-    ).toBe(100);
+    ).toBeNull();
   });
 
-  it("adds component scores independently", () => {
-    expect(
-      computeLocalPresenceScore({
-        hasWebsite: true,
-        hasPhoneOrEmail: false,
-        hasAddressOrCoords: false,
-        categoryMatch: false,
-        osmCompleteness: 0.5,
-      })
-    ).toBe(35); // 30 + round(0.5 * 10)
-  });
-});
-
-describe("signal scores", () => {
-  it("computes momentum from signals and social links", () => {
-    const signals = makeSignals({
-      momentumSignals: makeSignalList(2), // 30
-      offerSignals: makeSignalList(1), // 8
-      hiringSignals: makeSignalList(1), // 10
-      newsSignals: makeSignalList(1), // 10
-      socialLinks: { facebook: "https://facebook.example.org/acme" }, // 4
-    });
-    expect(computeMomentumScore(signals)).toBe(62);
+  it("excludes unavailable audits from comparisons", () => {
+    const comparisons = computeCategoryComparisons(report("user", 50), [
+      report("scored", 70),
+      report("unavailable", null),
+    ]);
+    expect(comparisons).toHaveLength(5);
+    expect(comparisons.every((item) => item.totalCompetitors === 1)).toBe(true);
   });
 
-  it("clamps momentum, risk, and change at 100", () => {
-    expect(
-      computeMomentumScore(makeSignals({ momentumSignals: makeSignalList(10) }))
-    ).toBe(100);
-    expect(
-      computeRiskScore(makeSignals({ riskSignals: makeSignalList(6) }))
-    ).toBe(100);
-    expect(
-      computeChangeScore(makeSignals({ changeSignals: makeSignalList(5) }))
-    ).toBe(100);
-  });
-
-  it("scales risk and change per signal", () => {
-    expect(
-      computeRiskScore(makeSignals({ riskSignals: makeSignalList(2) }))
-    ).toBe(40);
-    expect(
-      computeChangeScore(makeSignals({ changeSignals: makeSignalList(2) }))
-    ).toBe(50);
-  });
-});
-
-describe("statusForScore", () => {
-  it("maps score bands to statuses", () => {
-    expect(statusForScore(85)).toBe("leading");
-    expect(statusForScore(80)).toBe("leading");
-    expect(statusForScore(70)).toBe("competitive");
-    expect(statusForScore(65)).toBe("competitive");
-    expect(statusForScore(50)).toBe("behind but recoverable");
-    expect(statusForScore(45)).toBe("behind but recoverable");
-    expect(statusForScore(30)).toBe("low visibility");
-  });
-});
-
-describe("rankCompetitors", () => {
-  it("ranks user and competitors together by final score", () => {
-    const user = makeReport({ name: "You", source: "user", finalScore: 50 });
-    const compA = makeReport({ name: "A", source: "overpass", finalScore: 70 });
-    const compB = makeReport({ name: "B", source: "mock", finalScore: 30 });
-
-    const ranked = rankCompetitors(user, [compA, compB]);
-
+  it("ranks only successfully audited records", () => {
+    const user = report("user", 50);
+    const scored = report("scored", 70);
+    const unavailable = report("unavailable", null);
+    const ranked = rankCompetitors(user, [unavailable, scored]);
     expect(ranked.user.rank).toBe(2);
-    expect(ranked.competitors.map((c) => c.name)).toEqual(["A", "B"]);
-    expect(ranked.competitors.map((c) => c.rank)).toEqual([1, 3]);
+    expect(ranked.competitors.map((item) => [item.id, item.rank])).toEqual([
+      ["scored", 1],
+      ["unavailable", null],
+    ]);
+  });
+
+  it("keeps unavailable summary metrics null rather than synthetic zeroes", () => {
+    const summary = buildMarketSummary(report("user", null), [
+      report("unavailable", null),
+    ]);
+    expect(summary).toMatchObject({
+      competitorCount: 1,
+      auditedCompetitorCount: 0,
+      competitorAverageWebsiteScore: null,
+      competitorAverageFinalScore: null,
+      yourRank: null,
+      marketGap: null,
+      status: null,
+    });
   });
 });

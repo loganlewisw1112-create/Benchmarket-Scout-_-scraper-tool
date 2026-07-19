@@ -5,6 +5,7 @@ import RecommendationPanel from "./RecommendationPanel";
 import ReportCard from "./ReportCard";
 import ScoreCards from "./ScoreCards";
 import SignalPanel from "./SignalPanel";
+import SourcesAppendix from "./ProvenanceDetails";
 
 export default function ResultsDashboard({
   data,
@@ -28,6 +29,7 @@ export default function ResultsDashboard({
         <SignalPanel user={data.user} competitors={data.competitors} />
         <RecommendationPanel recommendations={data.recommendations} />
       </div>
+      <SourcesAppendix sources={data.provenance.sources} />
     </div>
   );
 }

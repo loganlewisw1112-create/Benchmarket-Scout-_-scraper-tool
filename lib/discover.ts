@@ -1,10 +1,13 @@
-import { logger, serializeError } from "./logger";
-import { getMockCompetitors } from "./mock-data";
-import { queryOverpass, type OverpassElement } from "./overpass";
-import type { CompetitorReport } from "./types";
+import {
+  queryOverpassDetailed,
+  resolveOsmTags,
+  type OverpassElement,
+} from "./overpass";
+import { normalizeHttpUrl } from "./url-safety";
 
 export type DiscoveredCandidate = {
   id: string;
+  osmElementUrl: string;
   name: string;
   website?: string;
   phone?: string;
@@ -15,19 +18,24 @@ export type DiscoveredCandidate = {
   priorityScore: number;
 };
 
+export type DiscoveryResult = {
+  candidates: DiscoveredCandidate[];
+  discoverySource: "overpass";
+  status: "complete" | "limited";
+  queryPerformed: boolean;
+  endpoint?: string;
+  accessedAt: string;
+};
+
 function normalizeName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function extractDomain(url?: string): string | undefined {
   if (!url) return undefined;
   try {
-    const normalized = url.startsWith("http") ? url : `https://${url}`;
-    const host = new URL(normalized).hostname.replace(/^www\./, "");
-    return host.toLowerCase();
+    const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    return new URL(normalized).hostname.replace(/^www\./, "").toLowerCase();
   } catch {
     return undefined;
   }
@@ -54,30 +62,37 @@ function categoryRelevance(
 }
 
 export function elementToCandidate(
-  el: OverpassElement,
+  element: OverpassElement,
   businessType: string
 ): DiscoveredCandidate | null {
-  const tags = el.tags ?? {};
-  const name = tags.name;
+  const tags = element.tags ?? {};
+  const name = tags.name?.trim();
   if (!name) return null;
 
-  const website = tags.website ?? tags["contact:website"];
+  const rawWebsite = tags.website ?? tags["contact:website"];
+  let website: string | undefined;
+  if (rawWebsite) {
+    try {
+      website = normalizeHttpUrl(rawWebsite);
+    } catch {
+      website = undefined;
+    }
+  }
   const phone = tags.phone ?? tags["contact:phone"];
   const address = buildAddress(tags);
-  const lat = el.lat ?? el.center?.lat;
-  const lon = el.lon ?? el.center?.lon;
-
+  const lat = element.lat ?? element.center?.lat;
+  const lon = element.lon ?? element.center?.lon;
   let priorityScore = 0;
   if (website) priorityScore += 30;
-  priorityScore += categoryRelevance(tags, businessType) * 2; // up to 20
+  priorityScore += categoryRelevance(tags, businessType) * 2;
   if (phone || tags["contact:email"] || tags.email) priorityScore += 20;
-  if (address || (lat && lon)) priorityScore += 15;
-  if (name.toLowerCase().includes(businessType.toLowerCase()))
-    priorityScore += 10;
+  if (address || (lat !== undefined && lon !== undefined)) priorityScore += 15;
+  if (name.toLowerCase().includes(businessType.toLowerCase())) priorityScore += 10;
   priorityScore += Math.min(5, Object.keys(tags).length / 2);
 
   return {
-    id: `osm-${el.type}-${el.id}`,
+    id: `osm-${element.type}-${element.id}`,
+    osmElementUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
     name,
     website,
     phone,
@@ -89,34 +104,59 @@ export function elementToCandidate(
   };
 }
 
-function dedupeCandidates(
+function identityKeys(candidate: DiscoveredCandidate): string[] {
+  return [
+    `name:${normalizeName(candidate.name)}|${
+      candidate.address ? normalizeName(candidate.address) : ""
+    }`,
+    candidate.website ? `domain:${extractDomain(candidate.website)}` : "",
+    candidate.phone ? `phone:${candidate.phone.replace(/\D/g, "")}` : "",
+  ].filter((key) => key && !key.endsWith(":"));
+}
+
+export function dedupeCandidates(
   candidates: DiscoveredCandidate[]
 ): DiscoveredCandidate[] {
-  const seen = new Map<string, DiscoveredCandidate>();
-
-  for (const candidate of candidates) {
-    const keys = [
-      `name:${normalizeName(candidate.name)}|${
-        candidate.address ? normalizeName(candidate.address) : ""
-      }`,
-      candidate.website ? `domain:${extractDomain(candidate.website)}` : "",
-      candidate.phone ? `phone:${candidate.phone.replace(/\D/g, "")}` : "",
-    ].filter(Boolean);
-
-    const existingKey = keys.find((k) => seen.has(k));
-
-    if (existingKey) {
-      const existing = seen.get(existingKey)!;
-      if (candidate.priorityScore > existing.priorityScore) {
-        for (const k of keys) seen.set(k, candidate);
-      }
-      continue;
+  const parent = candidates.map((_, index) => index);
+  const find = (index: number): number => {
+    while (parent[index] !== index) {
+      parent[index] = parent[parent[index]];
+      index = parent[index];
     }
+    return index;
+  };
+  const union = (left: number, right: number): void => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
+  };
+  const ownerByKey = new Map<string, number>();
+  candidates.forEach((candidate, index) => {
+    for (const key of identityKeys(candidate)) {
+      const owner = ownerByKey.get(key);
+      if (owner === undefined) ownerByKey.set(key, index);
+      else union(index, owner);
+    }
+  });
 
-    for (const k of keys) seen.set(k, candidate);
-  }
+  const bestByRoot = new Map<number, DiscoveredCandidate>();
+  candidates.forEach((candidate, index) => {
+    const root = find(index);
+    const current = bestByRoot.get(root);
+    if (
+      !current ||
+      candidate.priorityScore > current.priorityScore ||
+      (candidate.priorityScore === current.priorityScore &&
+        candidate.id.localeCompare(current.id) < 0)
+    ) {
+      bestByRoot.set(root, candidate);
+    }
+  });
 
-  return Array.from(new Set(seen.values()));
+  return [...bestByRoot.values()].sort(
+    (left, right) =>
+      right.priorityScore - left.priorityScore || left.id.localeCompare(right.id)
+  );
 }
 
 export function removeUserBusiness(
@@ -125,86 +165,54 @@ export function removeUserBusiness(
   userDomain?: string
 ): DiscoveredCandidate[] {
   const normalizedUserName = normalizeName(userBusinessName);
-
-  return candidates.filter((c) => {
-    const sameName = normalizeName(c.name) === normalizedUserName;
+  return candidates.filter((candidate) => {
+    const sameName = normalizeName(candidate.name) === normalizedUserName;
     const sameDomain =
-      userDomain && extractDomain(c.website) === extractDomain(userDomain);
+      userDomain && extractDomain(candidate.website) === extractDomain(userDomain);
     return !sameName && !sameDomain;
   });
 }
 
 export async function discoverCompetitors(args: {
   businessType: string;
-  market: string;
   userBusinessName: string;
   userDomain?: string;
-  lat?: number;
-  lon?: number;
-  demoMode: "live" | "auto" | "mock";
-}): Promise<{
-  candidates: DiscoveredCandidate[];
-  discoverySource: "overpass" | "mock" | "mixed";
-  overpassFailed: boolean;
-}> {
-  const { businessType, userBusinessName, userDomain, lat, lon, demoMode } =
-    args;
-
-  if (demoMode === "mock" || lat === undefined || lon === undefined) {
-    return { candidates: [], discoverySource: "mock", overpassFailed: false };
-  }
-
-  try {
-    const elements = await queryOverpass(businessType, lat, lon);
-    let candidates = elements
-      .map((el) => elementToCandidate(el, businessType))
-      .filter((c): c is DiscoveredCandidate => c !== null);
-
-    candidates = dedupeCandidates(candidates);
-    candidates = removeUserBusiness(candidates, userBusinessName, userDomain);
-    candidates.sort((a, b) => b.priorityScore - a.priorityScore);
-
+  lat: number;
+  lon: number;
+  signal?: AbortSignal;
+  budgetMs?: number;
+}): Promise<DiscoveryResult> {
+  if (resolveOsmTags(args.businessType).length === 0) {
     return {
-      candidates,
+      candidates: [],
       discoverySource: "overpass",
-      overpassFailed: false,
-    };
-  } catch (err) {
-    logger.warn("Overpass discovery failed, falling back to mock competitors", {
-      ...serializeError(err),
-    });
-    return { candidates: [], discoverySource: "mock", overpassFailed: true };
-  }
-}
-
-export async function mergeWithMockIfNeeded(args: {
-  candidates: DiscoveredCandidate[];
-  businessType: string;
-  minLiveCompetitors: number;
-  targetTotal: number;
-}): Promise<{
-  finalCandidates: (DiscoveredCandidate | { mock: true })[];
-  mockCompetitors: CompetitorReport[];
-  usedMockData: boolean;
-}> {
-  const { candidates, businessType, minLiveCompetitors, targetTotal } = args;
-
-  const liveTop = candidates.slice(0, targetTotal);
-
-  if (liveTop.length >= minLiveCompetitors) {
-    return {
-      finalCandidates: liveTop,
-      mockCompetitors: [],
-      usedMockData: false,
+      status: "limited",
+      queryPerformed: false,
+      accessedAt: new Date().toISOString(),
     };
   }
-
-  const needed = targetTotal - liveTop.length;
-  const mockCompetitors = await getMockCompetitors(businessType, needed);
-
+  const query = await queryOverpassDetailed(
+    args.businessType,
+    args.lat,
+    args.lon,
+    12_000,
+    { signal: args.signal, budgetMs: args.budgetMs }
+  );
+  const candidates = removeUserBusiness(
+    dedupeCandidates(
+      query.elements
+        .map((element) => elementToCandidate(element, args.businessType))
+        .filter((candidate): candidate is DiscoveredCandidate => candidate !== null)
+    ),
+    args.userBusinessName,
+    args.userDomain
+  );
   return {
-    finalCandidates: liveTop,
-    mockCompetitors,
-    usedMockData: true,
+    candidates,
+    discoverySource: "overpass",
+    status: "complete",
+    queryPerformed: true,
+    endpoint: query.endpoint,
+    accessedAt: query.accessedAt,
   };
 }

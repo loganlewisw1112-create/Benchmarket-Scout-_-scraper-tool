@@ -1,4 +1,5 @@
 import type { CompetitorReport, MarketSignal } from "@/lib/types";
+import { CitationMarkers } from "./ProvenanceDetails";
 
 function ConfidenceBadge({ confidence }: { confidence: MarketSignal["confidence"] }) {
   const styles = {
@@ -87,6 +88,7 @@ export default function SignalPanel({
                 </span>
                 <p className="mt-0.5 text-xs text-slate-600">
                   {item.signal.evidence}
+                  <CitationMarkers sourceIds={item.signal.sourceIds} />
                 </p>
               </div>
               <ConfidenceBadge confidence={item.signal.confidence} />
