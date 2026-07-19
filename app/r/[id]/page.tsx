@@ -3,8 +3,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ResultsDashboard from "@/components/ResultsDashboard";
+import MaintenancePage from "@/components/MaintenancePage";
 import WaitlistForm from "@/components/WaitlistForm";
 import { getReport } from "@/lib/store";
+import { isMaintenanceMode } from "@/lib/maintenance";
 import type { AnalyzeMarketResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -28,6 +30,14 @@ export async function generateMetadata({
 }: {
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
+  if (isMaintenanceMode()) {
+    return {
+      title: `Maintenance | ${SITE_NAME}`,
+      description: `${SITE_NAME} reports are temporarily unavailable during a real-data-only upgrade.`,
+      robots: { index: false, follow: false },
+    };
+  }
+
   const { id } = await params;
   const stored = await getCachedReport(id);
 
@@ -70,6 +80,8 @@ export default async function SharedReportPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  if (isMaintenanceMode()) return <MaintenancePage />;
+
   const { id } = await params;
   const stored = await getCachedReport(id);
   if (!stored) notFound();

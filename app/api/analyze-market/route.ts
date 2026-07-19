@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { analyzeMarket } from "@/lib/analyze-market";
 import { enforceGlobalAnalyzeLimit, enforceGuard } from "@/lib/api-guard";
 import { logger, serializeError, withRequestId } from "@/lib/logger";
+import { isMaintenanceMode, MAINTENANCE_RESPONSE } from "@/lib/maintenance";
 import { saveReport } from "@/lib/store";
 import { validateAnalyzeMarketRequest } from "@/lib/validation";
 
@@ -10,6 +11,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(request: Request) {
+  if (isMaintenanceMode()) {
+    return NextResponse.json(MAINTENANCE_RESPONSE, {
+      status: 503,
+      headers: { "Retry-After": "3600" },
+    });
+  }
+
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
 
