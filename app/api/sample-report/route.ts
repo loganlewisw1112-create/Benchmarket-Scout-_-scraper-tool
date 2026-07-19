@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { enforceGuard } from "@/lib/api-guard";
 import { logger, serializeError, withRequestId } from "@/lib/logger";
+import { isMaintenanceMode, MAINTENANCE_RESPONSE } from "@/lib/maintenance";
 import { generateSampleReport } from "@/lib/sample-report";
 import { saveReport } from "@/lib/store";
 
@@ -10,6 +11,13 @@ export const dynamic = "force-dynamic";
 // Same access-code + rate-limit gate as /api/analyze-market. No request
 // body — every call is a fresh, randomly generated sample.
 export async function GET(request: Request) {
+  if (isMaintenanceMode()) {
+    return NextResponse.json(MAINTENANCE_RESPONSE, {
+      status: 503,
+      headers: { "Retry-After": "3600" },
+    });
+  }
+
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
 
