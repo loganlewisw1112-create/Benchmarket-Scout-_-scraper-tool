@@ -6,58 +6,83 @@ function textResponse(body: string, ok = true) {
 }
 
 describe("fetchNewsSignals", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  afterEach(() => vi.unstubAllGlobals());
 
-  it("maps articles to MarketSignal[] capped at 5", async () => {
-    const articles = Array.from({ length: 7 }, (_, i) => ({
-      title: `Article ${i}`,
-      url: `https://news.example.org/${i}`,
+  it("maps only sourced articles, capped at five", async () => {
+    const articles = Array.from({ length: 7 }, (_, index) => ({
+      title: `Article ${index}`,
+      url: `https://news.example.org/${index}`,
+      seendate: `2026010${index + 1}T000000Z`,
     }));
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(textResponse(JSON.stringify({ articles })))
     );
-
-    const signals = await fetchNewsSignals("Acme Plumbing");
-
-    expect(signals).toHaveLength(5);
-    expect(signals[0].label).toBe("Public news mention found");
-    expect(signals[0].evidence).toContain("Article 0");
-    expect(signals[0].sourceUrl).toBe("https://news.example.org/0");
-    expect(signals[0].sourceType).toBe("news");
-    expect(signals[0].confidence).toBe("medium");
+    const result = await fetchNewsSignals("Acme");
+    expect(result.status).toBe("complete");
+    expect(result.signals).toHaveLength(5);
+    expect(result.signals[0]).toMatchObject({
+      sourceType: "news",
+      sourceUrl: "https://news.example.org/0",
+    });
   });
 
-  it("returns [] on a non-ok HTTP response", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(textResponse("", false)));
-    expect(await fetchNewsSignals("Acme")).toEqual([]);
+  it("treats a valid empty article list as complete", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(textResponse(JSON.stringify({ articles: [] })))
+    );
+    await expect(fetchNewsSignals("Acme")).resolves.toMatchObject({
+      status: "complete",
+      signals: [],
+    });
   });
 
-  it("returns [] on an empty response body", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(textResponse("   ")));
-    expect(await fetchNewsSignals("Acme")).toEqual([]);
+  it.each([
+    ["HTTP failure", textResponse("", false)],
+    ["empty body", textResponse("   ")],
+    ["malformed JSON", textResponse("not json")],
+  ])("marks %s unavailable", async (_label, response) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    await expect(fetchNewsSignals("Acme")).resolves.toMatchObject({
+      status: "unavailable",
+      signals: [],
+    });
   });
 
-  it("returns [] on malformed JSON", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(textResponse("not json")));
-    expect(await fetchNewsSignals("Acme")).toEqual([]);
-  });
-
-  it("returns [] when fetch throws", async () => {
+  it("marks transport failure unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("aborted")));
-    expect(await fetchNewsSignals("Acme")).toEqual([]);
+    expect((await fetchNewsSignals("Acme")).status).toBe("unavailable");
   });
 
-  it("falls back to a generic evidence string when a title is missing", async () => {
+  it("honors an already-canceled parent budget without starting a request", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("request deadline"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchNewsSignals("Acme", {
+      signal: controller.signal,
+      budgetMs: 3_500,
+    });
+
+    expect(result.status).toBe("unavailable");
+    expect(Number.isNaN(Date.parse(result.accessedAt))).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("drops articles missing a title or URL", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        textResponse(JSON.stringify({ articles: [{ url: "https://news.example.org/x" }] }))
+        textResponse(
+          JSON.stringify({ articles: [{ url: "https://news.example.org/x" }] })
+        )
       )
     );
-    const [signal] = await fetchNewsSignals("Acme");
-    expect(signal.evidence).toBe("Public news mention found.");
+    await expect(fetchNewsSignals("Acme")).resolves.toMatchObject({
+      status: "complete",
+      signals: [],
+    });
   });
 });

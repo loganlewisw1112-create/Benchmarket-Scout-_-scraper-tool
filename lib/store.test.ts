@@ -2,22 +2,40 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AnalyzeMarketResponse } from "./types";
+
+vi.mock("./invariants", () => ({
+  assertRealDataResponse: (value: AnalyzeMarketResponse) => {
+    if (value.schemaVersion !== 2) throw new Error("invalid real-data report");
+  },
+}));
+
 import {
   admitWaitlistEmail,
   getReport,
+  isDurableStoreConfigured,
   isValidReportId,
+  KV_REQUEST_TIMEOUT_MS,
   kvCappedRateLimit,
+  kvRateLimit,
   newReportId,
+  readReportV2,
+  readSampleSnapshotsV2,
+  replaceSampleSnapshot,
   saveReport,
   WAITLIST_NEW_SIGNUPS_PER_WINDOW,
 } from "./store";
 import { WINDOW_MS } from "./rate-limit";
+
+const validReport = { schemaVersion: 2 } as AnalyzeMarketResponse;
 
 // These tests exercise the filesystem fallback backend (no KV env), which is
 // what runs in local dev and CI.
 
 let tmpDir: string;
 const prevCacheDir = process.env.CACHE_DIR;
+const prevVercel = process.env.VERCEL;
+const prevVercelEnv = process.env.VERCEL_ENV;
 
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "scout-store-"));
@@ -26,12 +44,18 @@ beforeEach(async () => {
   delete process.env.KV_REST_API_TOKEN;
   delete process.env.UPSTASH_REDIS_REST_URL;
   delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  delete process.env.VERCEL;
+  delete process.env.VERCEL_ENV;
 });
 
 afterEach(async () => {
   vi.unstubAllGlobals();
   if (prevCacheDir === undefined) delete process.env.CACHE_DIR;
   else process.env.CACHE_DIR = prevCacheDir;
+  if (prevVercel === undefined) delete process.env.VERCEL;
+  else process.env.VERCEL = prevVercel;
+  if (prevVercelEnv === undefined) delete process.env.VERCEL_ENV;
+  else process.env.VERCEL_ENV = prevVercelEnv;
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -53,18 +77,132 @@ describe("report ids", () => {
 
 describe("saveReport / getReport (filesystem backend)", () => {
   it("round-trips a report", async () => {
-    const id = await saveReport({ hello: "world", n: 42 });
+    const id = await saveReport(validReport);
     expect(isValidReportId(id)).toBe(true);
     const stored = await getReport(id);
     expect(stored).not.toBeNull();
     expect(stored?.id).toBe(id);
-    expect((stored?.report as { hello: string }).hello).toBe("world");
+    expect(stored?.schemaVersion).toBe(2);
+    expect(stored?.report.schemaVersion).toBe(2);
     expect(typeof stored?.createdAt).toBe("string");
   });
 
   it("returns null for unknown or invalid ids", async () => {
     expect(await getReport(newReportId())).toBeNull();
     expect(await getReport("bad id!")).toBeNull();
+  });
+
+  it("returns a typed legacy outcome without reading it as v2", async () => {
+    const id = newReportId();
+    const dir = path.join(tmpDir, "store", "reports");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, `${id}.json`), JSON.stringify({ id }));
+    expect(await readReportV2(id)).toEqual({ status: "legacy" });
+  });
+
+  it("rejects an invariant violation before writing", async () => {
+    await expect(
+      saveReport({ schemaVersion: 1 } as unknown as AnalyzeMarketResponse)
+    ).rejects.toThrow("invalid real-data report");
+    await expect(
+      fs.readdir(path.join(tmpDir, "store", "report-v2"))
+    ).rejects.toThrow();
+  });
+
+  it("fails closed instead of using ephemeral files on a hosted deployment", async () => {
+    process.env.VERCEL = "1";
+    expect(isDurableStoreConfigured()).toBe(false);
+    await expect(saveReport(validReport)).rejects.toThrow(
+      /Durable report storage is not configured/
+    );
+    await expect(readReportV2(newReportId())).rejects.toThrow(
+      /Durable report storage is not configured/
+    );
+    await expect(readReportV2("bad id!")).rejects.toThrow(
+      /Durable report storage is not configured/
+    );
+  });
+
+  it("does not combine credentials from different REST KV providers", async () => {
+    process.env.VERCEL = "1";
+    process.env.KV_REST_API_URL = "https://vercel-kv.test";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "upstash-token";
+    expect(isDurableStoreConfigured()).toBe(false);
+    await expect(saveReport(validReport)).rejects.toThrow(
+      /Durable report storage is not configured/
+    );
+
+    process.env.KV_REST_API_TOKEN = "vercel-token";
+    expect(isDurableStoreConfigured()).toBe(true);
+  });
+
+  it("does not treat whitespace-only REST KV values as configured", () => {
+    process.env.KV_REST_API_URL = "   ";
+    process.env.KV_REST_API_TOKEN = "   ";
+    expect(isDurableStoreConfigured()).toBe(false);
+  });
+});
+
+describe("v2 sample snapshots (filesystem backend)", () => {
+  it("rejects ephemeral sample storage on a hosted deployment", async () => {
+    process.env.VERCEL = "1";
+    const snapshot = {
+      schemaVersion: 2 as const,
+      sampleId: newReportId(),
+      catalogId: "bakery-firebrand-bread",
+      reportId: newReportId(),
+      generatedAt: new Date().toISOString(),
+      report: validReport,
+    };
+    await expect(replaceSampleSnapshot(snapshot)).rejects.toThrow(
+      /Durable report storage is not configured/
+    );
+    await expect(
+      readSampleSnapshotsV2([snapshot.catalogId])
+    ).rejects.toThrow(/Durable report storage is not configured/);
+  });
+
+  it("atomically replaces and validates a catalog snapshot", async () => {
+    const first = {
+      schemaVersion: 2 as const,
+      sampleId: newReportId(),
+      catalogId: "bakery-firebrand-bread",
+      reportId: newReportId(),
+      generatedAt: new Date().toISOString(),
+      report: validReport,
+    };
+    await replaceSampleSnapshot(first);
+    const second = { ...first, sampleId: newReportId() };
+    await replaceSampleSnapshot(second);
+
+    const [read] = await readSampleSnapshotsV2([first.catalogId]);
+    expect(read?.outcome.status).toBe("ok");
+    if (read?.outcome.status === "ok") {
+      expect(read.outcome.value.sampleId).toBe(second.sampleId);
+    }
+    expect(await fs.readdir(path.join(tmpDir, "store", "sample-v2"))).toEqual([
+      `${first.catalogId}.json`,
+    ]);
+  });
+
+  it("reports missing, legacy, and invalid outcomes distinctly", async () => {
+    const legacyDir = path.join(tmpDir, "store", "samples");
+    const currentDir = path.join(tmpDir, "store", "sample-v2");
+    await fs.mkdir(legacyDir, { recursive: true });
+    await fs.mkdir(currentDir, { recursive: true });
+    await fs.writeFile(path.join(legacyDir, "legacy-entry.json"), "{}");
+    await fs.writeFile(path.join(currentDir, "invalid-entry.json"), "{}");
+
+    const reads = await readSampleSnapshotsV2([
+      "missing-entry",
+      "legacy-entry",
+      "invalid-entry",
+    ]);
+    expect(reads.map((read) => read.outcome.status)).toEqual([
+      "missing",
+      "legacy",
+      "invalid",
+    ]);
   });
 });
 
@@ -264,5 +402,38 @@ describe("atomic KV admission", () => {
     await expect(
       admitWaitlistEmail("failure@example.com", {}, T0)
     ).rejects.toThrow("KV down");
+  });
+});
+
+describe("REST KV request timeout", () => {
+  it("applies a 1.5-second abort signal to every hosted KV fetch", async () => {
+    process.env.KV_REST_API_URL = "https://kv.test";
+    process.env.KV_REST_API_TOKEN = "token";
+    const controller = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(controller.signal);
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => {
+        void _input;
+        void _init;
+        return new Response(JSON.stringify({ result: 1 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await kvRateLimit("timeout-test", WINDOW_MS, 10);
+
+    expect(KV_REQUEST_TIMEOUT_MS).toBe(1_500);
+    expect(timeout).toHaveBeenCalledTimes(2);
+    expect(timeout).toHaveBeenNthCalledWith(1, KV_REQUEST_TIMEOUT_MS);
+    expect(timeout).toHaveBeenNthCalledWith(2, KV_REQUEST_TIMEOUT_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init?.signal).toBe(controller.signal);
+    }
   });
 });

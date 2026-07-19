@@ -14,7 +14,7 @@ describe("HomePage key gate UI", () => {
       screen.queryByPlaceholderText("Paste your beta access code")
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "See a sample report" })
+      screen.getByRole("button", { name: "See a real sample report" })
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Analyze Market" })

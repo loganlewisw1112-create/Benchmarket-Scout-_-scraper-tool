@@ -79,18 +79,32 @@ describe("validateAnalyzeMarketRequest", () => {
     expect(validateAnalyzeMarketRequest(null).success).toBe(false);
   });
 
-  it("enforces the demoMode enum", () => {
+  it("rejects the legacy options/demoMode input", () => {
     expect(
       validateAnalyzeMarketRequest({
         ...validInput,
         options: { demoMode: "mock" },
       }).success
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("rejects all unknown top-level fields", () => {
     expect(
       validateAnalyzeMarketRequest({
         ...validInput,
-        options: { demoMode: "banana" },
+        unexpected: true,
       }).success
+    ).toBe(false);
+  });
+
+  it("rejects non-HTTP business URLs", () => {
+    expect(
+      validateAnalyzeMarketRequest({ ...validInput, businessUrl: "acme.test" })
+        .success
+    ).toBe(false);
+    expect(
+      validateAnalyzeMarketRequest({ ...validInput, businessUrl: "ftp://acme.test" })
+        .success
     ).toBe(false);
   });
 });

@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OSM_CATEGORY_MAP,
   queryOverpass,
+  queryOverpassDetailed,
   resolveIndustry,
   resolveOsmTags,
   type OsmTagPair,
 } from "./overpass";
+import { SourceUnavailableError } from "./pipeline-errors";
 
 function response(body: string, ok = true, status = 200) {
   return { ok, status, text: async () => body } as Response;
@@ -21,9 +23,13 @@ describe("queryOverpass", () => {
     const fetchMock = vi.fn().mockResolvedValue(response(JSON.stringify({ elements })));
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await queryOverpass("dentist", 30, -97);
+    const result = await queryOverpassDetailed("dentist", 30, -97);
 
-    expect(result).toEqual(elements);
+    expect(result.elements).toEqual(elements);
+    expect(result.endpoint).toBe(
+      "https://overpass-api.de/api/interpreter"
+    );
+    expect(Number.isNaN(Date.parse(result.accessedAt))).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("https://overpass-api.de/api/interpreter");
   });
@@ -33,23 +39,30 @@ describe("queryOverpass", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response("", false, 504))
-      .mockResolvedValueOnce(response("", false, 504))
       .mockResolvedValue(response(JSON.stringify({ elements })));
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await queryOverpass("dentist", 30, -97);
+    const result = await queryOverpassDetailed("dentist", 30, -97);
 
-    expect(result).toEqual(elements);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[2][0]).toBe("https://overpass.kumi.systems/api/interpreter");
+    expect(result.elements).toEqual(elements);
+    expect(result.endpoint).toBe(
+      "https://overpass.private.coffee/api/interpreter"
+    );
+    expect(Number.isNaN(Date.parse(result.accessedAt))).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("https://overpass.private.coffee/api/interpreter");
   }, 5000);
 
   it("throws after exhausting all endpoints and attempts", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response("", false, 500));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(queryOverpass("dentist", 30, -97)).rejects.toThrow();
-    expect(fetchMock).toHaveBeenCalledTimes(4); // 2 endpoints x 2 attempts
+    await expect(queryOverpass("dentist", 30, -97)).rejects.toMatchObject({
+      code: "SOURCE_UNAVAILABLE",
+      status: 503,
+      source: "overpass",
+    } satisfies Partial<SourceUnavailableError>);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // 2 endpoints x 1 attempt
   }, 8000);
 
   it("treats a non-JSON response as a failure and retries", async () => {
@@ -84,6 +97,58 @@ describe("queryOverpass", () => {
     const result = await queryOverpass("the company llc", 41.88, -87.63);
 
     expect(result).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes a successful zero-result response from transport failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(response(JSON.stringify({ elements: [] })))
+    );
+    await expect(queryOverpass("dentist", 30, -97)).resolves.toEqual([]);
+  });
+
+  it("retries a malformed HTTP-200 payload instead of treating it as zero results", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(JSON.stringify({ remark: "runtime error" })))
+      .mockResolvedValue(response(JSON.stringify({ elements: [] })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(queryOverpass("dentist", 30, -97)).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  }, 3000);
+
+  it("raises SOURCE_UNAVAILABLE after malformed payload retries are exhausted", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(response(JSON.stringify({ remark: "runtime error" })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(queryOverpass("dentist", 30, -97)).rejects.toMatchObject({
+      code: "SOURCE_UNAVAILABLE",
+      status: 503,
+      source: "overpass",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  }, 8000);
+
+  it("honors an already-canceled parent budget with typed SOURCE_UNAVAILABLE", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("request deadline"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      queryOverpass("dentist", 30, -97, 12_000, {
+        signal: controller.signal,
+        budgetMs: 6_000,
+      })
+    ).rejects.toMatchObject({
+      code: "SOURCE_UNAVAILABLE",
+      status: 503,
+      source: "overpass",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

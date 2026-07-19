@@ -1,5 +1,11 @@
 import DownloadPdfButton from "./DownloadPdfButton";
 import type { AnalyzeMarketResponse } from "@/lib/types";
+import { CitationMarkers } from "./ProvenanceDetails";
+
+function signedMetric(value: number | null): string {
+  if (value === null) return "N/A";
+  return `${value >= 0 ? "+" : ""}${value}`;
+}
 
 export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
   const { report, summary, dataQuality } = data;
@@ -35,12 +41,35 @@ export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
               <li key={idx} className="text-sm text-slate-700">
                 <span className="font-medium text-slate-900">{f.title}:</span>{" "}
                 {f.finding}
+                <CitationMarkers sourceIds={f.sourceIds} />
                 <span className="ml-1.5 text-xs text-slate-400">
                   ({f.confidence} confidence)
                 </span>
               </li>
             ))}
           </ul>
+
+          {report.topRisks.length > 0 && (
+            <>
+              <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Possible Risks / Changes
+              </h3>
+              <ul className="mt-1.5 space-y-2">
+                {report.topRisks.slice(0, 5).map((risk, idx) => (
+                  <li key={idx} className="text-sm text-slate-700">
+                    <span className="font-medium text-slate-900">
+                      {risk.title}:
+                    </span>{" "}
+                    {risk.finding}
+                    <CitationMarkers sourceIds={risk.sourceIds} />
+                    <span className="ml-1.5 text-xs text-slate-400">
+                      ({risk.confidence} confidence)
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
 
         <div>
@@ -51,20 +80,37 @@ export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
             <div className="flex justify-between">
               <dt className="text-slate-500">Status</dt>
               <dd className="font-medium capitalize text-slate-900">
-                {summary.status}
+                {summary.status ?? "N/A"}
               </dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-slate-500">Rank</dt>
               <dd className="font-medium text-slate-900">
-                #{summary.yourRank} of {summary.competitorCount + 1}
+                {summary.yourRank === null
+                  ? "N/A"
+                  : `#${summary.yourRank} of ${summary.auditedCompetitorCount + 1}`}
               </dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-slate-500">Market gap</dt>
               <dd className="font-medium text-slate-900">
-                {summary.marketGap >= 0 ? "+" : ""}
-                {summary.marketGap}
+                {signedMetric(summary.marketGap)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-500">Competitor avg.</dt>
+              <dd className="font-medium text-slate-900">
+                {summary.competitorAverageFinalScore === null
+                  ? "N/A"
+                  : `${summary.competitorAverageFinalScore}/100`}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-500">Avg. website</dt>
+              <dd className="font-medium text-slate-900">
+                {summary.competitorAverageWebsiteScore === null
+                  ? "N/A"
+                  : `${summary.competitorAverageWebsiteScore}/100`}
               </dd>
             </div>
           </dl>
@@ -74,7 +120,10 @@ export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
           </h3>
           <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-sm text-slate-700">
             {report.actionPlan.slice(0, 5).map((rec, idx) => (
-              <li key={idx}>{rec.title}</li>
+              <li key={idx}>
+                {rec.title}
+                <CitationMarkers sourceIds={rec.sourceIds} />
+              </li>
             ))}
           </ol>
         </div>
@@ -83,11 +132,9 @@ export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
       <div className="mt-5 border-t border-slate-100 pt-3 text-xs text-slate-500">
         <span className="font-medium">Data quality:</span>{" "}
         {report.dataQualityNote}
-        {dataQuality.usedMockData && (
-          <span className="ml-1.5 font-semibold text-purple-700">
-            Includes labeled fallback demo rows.
-          </span>
-        )}
+        <span className="ml-1.5 font-semibold capitalize text-amber-700">
+          Coverage status: {dataQuality.coverageStatus}.
+        </span>
       </div>
     </div>
   );

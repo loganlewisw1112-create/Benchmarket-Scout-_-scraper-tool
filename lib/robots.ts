@@ -1,5 +1,6 @@
 import { CACHE_TTL, readCache, writeCache } from "./cache";
-import { isSafePublicHttpUrl, normalizeHttpUrl } from "./url-safety";
+import { createPinnedHttpTarget, normalizeHttpUrl } from "./url-safety";
+import type { Dispatcher } from "undici";
 
 // robots.txt compliance for website audits, gated by STRICT_ROBOTS=true.
 // Follows RFC 9309 semantics for the common cases: user-agent group
@@ -124,9 +125,10 @@ async function fetchRobotsTxt(startUrl: string): Promise<CachedRobots> {
   let currentUrl = startUrl;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    // Re-validate every hop, mirroring safeFetchHtml's redirect handling.
-    const safe = await isSafePublicHttpUrl(currentUrl);
-    if (!safe) return { fetched: false, content: "" };
+    // Re-resolve, validate, and pin every redirect hop. The request connector
+    // cannot perform a second DNS lookup after this safety decision.
+    const pinnedTarget = await createPinnedHttpTarget(currentUrl);
+    if (!pinnedTarget) return { fetched: false, content: "" };
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), ROBOTS_FETCH_TIMEOUT_MS);
@@ -136,11 +138,13 @@ async function fetchRobotsTxt(startUrl: string): Promise<CachedRobots> {
         headers: { "User-Agent": USER_AGENT, Accept: "text/plain" },
         redirect: "manual",
         signal: controller.signal,
-      });
+        dispatcher: pinnedTarget.dispatcher,
+      } as RequestInit & { dispatcher: Dispatcher });
 
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get("location");
         if (!location) return { fetched: false, content: "" };
+        await res.body?.cancel();
         currentUrl = new URL(location, currentUrl).toString();
         continue;
       }
@@ -154,6 +158,7 @@ async function fetchRobotsTxt(startUrl: string): Promise<CachedRobots> {
       return { fetched: false, content: "" };
     } finally {
       clearTimeout(timeout);
+      await pinnedTarget.close();
     }
   }
 

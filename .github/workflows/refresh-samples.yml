@@ -1,0 +1,69 @@
+name: Refresh real sample reports
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-real-sample-reports
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      SAMPLE_REFRESH_URL: https://benchmarket-scout-scraper-tool.vercel.app/api/sample-report/refresh
+      SAMPLE_REFRESH_SECRET: ${{ secrets.SAMPLE_REFRESH_SECRET }}
+    steps:
+      - name: Refresh twelve catalog entries sequentially
+        shell: bash
+        run: |
+          set -euo pipefail
+          catalog=(
+            hvac-absolute-air-solutions bakery-firebrand-bread dentistry-richard-tabor
+            plumbing-berkeley-plumbing landscaping-rendered-stone law-andrew-dosa
+            yoga-namaste auto-detailing-jg-mobile pet-grooming-alameda-mobile
+            restaurant-speisekammer cafe-wescafe veterinary-oakland-veterinary
+            physical-therapy-oso chiropractic-clinton barbering-als
+            hair-salon-salon-1500 electrical-alameda-oakland roofing-bay-roofing
+            florist-central-florist accounting-paul-lyon real-estate-cerda-zein
+            cleaning-z-and-j gym-alameda-fitness daycare-little-blue-dolphins
+            photography-clayton-mitchell
+          )
+          successes=0
+          attempts=0
+          for catalog_id in "${catalog[@]}"; do
+            attempts=$((attempts + 1))
+            response_body="$(mktemp)"
+            if http_code=$(curl --silent --show-error \
+              --connect-timeout 10 --max-time 75 \
+              --output "$response_body" --write-out '%{http_code}' \
+              --request POST "$SAMPLE_REFRESH_URL" \
+              --header "content-type: application/json" \
+              --header "x-sample-refresh-secret: $SAMPLE_REFRESH_SECRET" \
+              --data "{\"catalogId\":\"$catalog_id\"}"); then
+              if [[ "$http_code" =~ ^2 ]]; then
+                successes=$((successes + 1))
+                echo "Refreshed $catalog_id ($successes/12)."
+              else
+                echo "Refresh failed for $catalog_id with HTTP $http_code."
+                sed -e 's/[[:cntrl:]]/ /g' "$response_body"
+              fi
+            else
+              echo "Refresh request failed for $catalog_id."
+            fi
+            rm -f "$response_body"
+
+            if [ "$successes" -eq 12 ]; then break; fi
+            sleep 65
+          done
+
+          if [ "$successes" -lt 12 ]; then
+            echo "Only $successes of 12 required samples refreshed after $attempts attempts."
+            exit 1
+          fi
