@@ -2,37 +2,73 @@ import * as cheerio from "cheerio";
 import { CACHE_TTL, readCache, writeCache } from "./cache";
 import { isPathAllowed } from "./robots";
 import { KEYWORDS, extractSocialLinksFromHrefs } from "./signals";
-import type { EvidenceItem, ExtractedLink, WebsiteAudit } from "./types";
-import { isSafePublicHttpUrl, normalizeHttpUrl } from "./url-safety";
+import type {
+  EvidenceItem,
+  ExtractedLink,
+  SourceId,
+  WebsiteAudit,
+} from "./types";
+import { createPinnedHttpTarget, normalizeHttpUrl } from "./url-safety";
+import type { Dispatcher } from "undici";
+import {
+  abortable,
+  createTimedSignal,
+  remainingBudgetMs,
+  type RequestBudgetOptions,
+} from "./time-budget";
 
 const USER_AGENT =
   process.env.APP_USER_AGENT ??
   "BenchmarkScout/0.1 (contact: github.com/loganlewisw1112-create/Benchmarket-Scout-_-scraper-tool)";
 
 const MAX_HTML_BYTES = 1.5 * 1024 * 1024;
-const FETCH_TIMEOUT_MS = 9000;
+const PAGE_FETCH_BUDGET_MS = 5_000;
 const MAX_REDIRECTS = 3;
 
 export type PageText = {
   url: string;
   text: string;
   sourceType: "homepage" | "linked_page";
+  sourceIds: SourceId[];
+};
+
+export type LinkedPageAttempt = {
+  url: string;
+  status: "used" | "unavailable";
+  reason?: string;
+  accessedAt: string;
 };
 
 export type AuditResult = {
   audit: WebsiteAudit;
   pageTexts: PageText[];
+  linkedPageAttempts: LinkedPageAttempt[];
+  accessedAt: string;
 };
 
 type FetchOutcome =
   | { ok: true; html: string; finalUrl: string; bytes: number; ms: number }
   | { ok: false; reason: string };
 
-async function safeFetchHtml(rawUrl: string): Promise<FetchOutcome> {
+async function safeFetchHtml(
+  rawUrl: string,
+  options: RequestBudgetOptions = {}
+): Promise<FetchOutcome> {
   let currentUrl = rawUrl;
   const start = Date.now();
+  if (options.signal?.aborted || (options.budgetMs ?? 1) <= 0) {
+    return { ok: false, reason: "Audit time budget exhausted" };
+  }
+  const timed = createTimedSignal(
+    options.signal,
+    Math.min(PAGE_FETCH_BUDGET_MS, options.budgetMs ?? PAGE_FETCH_BUDGET_MS)
+  );
 
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+  try {
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      if (timed.signal.aborted) {
+        return { ok: false, reason: "Audit time budget exhausted" };
+      }
     let normalized: string;
     try {
       normalized = normalizeHttpUrl(currentUrl);
@@ -40,20 +76,32 @@ async function safeFetchHtml(rawUrl: string): Promise<FetchOutcome> {
       return { ok: false, reason: "Invalid URL" };
     }
 
-    const isSafe = await isSafePublicHttpUrl(normalized);
-    if (!isSafe) {
+    let pinnedTarget: Awaited<ReturnType<typeof createPinnedHttpTarget>>;
+    try {
+      pinnedTarget = await abortable(
+        createPinnedHttpTarget(normalized, timed.signal),
+        timed.signal
+      );
+    } catch {
+      return { ok: false, reason: "Audit time budget exhausted" };
+    }
+    if (!pinnedTarget) {
       return { ok: false, reason: "URL failed public safety check" };
     }
 
     // No-op unless STRICT_ROBOTS=true; covers homepage, linked pages, and
     // every redirect hop since each pass through this loop re-checks.
-    const robotsAllowed = await isPathAllowed(normalized);
+    let robotsAllowed: boolean;
+    try {
+      robotsAllowed = await abortable(isPathAllowed(normalized), timed.signal);
+    } catch {
+      await pinnedTarget.close();
+      return { ok: false, reason: "Audit time budget exhausted" };
+    }
     if (!robotsAllowed) {
+      await pinnedTarget.close();
       return { ok: false, reason: "Disallowed by robots.txt" };
     }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     try {
       const res = await fetch(normalized, {
@@ -62,14 +110,16 @@ async function safeFetchHtml(rawUrl: string): Promise<FetchOutcome> {
           Accept: "text/html,application/xhtml+xml",
         },
         redirect: "manual",
-        signal: controller.signal,
-      });
+        signal: timed.signal,
+        dispatcher: pinnedTarget.dispatcher,
+      } as RequestInit & { dispatcher: Dispatcher });
 
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get("location");
         if (!location) {
           return { ok: false, reason: "Redirect without location header" };
         }
+        await res.body?.cancel();
         currentUrl = new URL(location, normalized).toString();
         continue;
       }
@@ -125,14 +175,20 @@ async function safeFetchHtml(rawUrl: string): Promise<FetchOutcome> {
         ms: Date.now() - start,
       };
     } catch (err) {
+      if (timed.signal.aborted) {
+        return { ok: false, reason: "Audit time budget exhausted" };
+      }
       const message = err instanceof Error ? err.message : "Fetch failed";
       return { ok: false, reason: message };
     } finally {
-      clearTimeout(timeout);
+      await pinnedTarget.close();
     }
   }
 
-  return { ok: false, reason: "Too many redirects" };
+    return { ok: false, reason: "Too many redirects" };
+  } finally {
+    timed.cleanup();
+  }
 }
 
 function countKeywordOccurrences(text: string, keywords: readonly string[]): number {
@@ -322,46 +378,65 @@ function computeScoreBreakdown(fields: {
   };
 }
 
-export function skippedAudit(url: string | undefined, reason: string): AuditResult {
+export function skippedAudit(
+  url: string | undefined,
+  reason: string,
+  sourceIds: SourceId[] = [],
+  accessedAt: string = new Date().toISOString()
+): AuditResult {
   return {
     audit: {
       url,
+      auditStatus: "unavailable",
       skipped: true,
       reason,
-      h1Count: 0,
-      headingCount: 0,
-      wordCount: 0,
-      ctaCount: 0,
-      hasPhone: false,
-      hasEmail: false,
-      hasContactPage: false,
-      hasBookingOrQuote: false,
-      hasPricingPage: false,
-      hasServicesPage: false,
-      hasAboutOrTeamPage: false,
-      hasBlogOrNewsPage: false,
-      hasCareersPage: false,
-      hasTestimonials: false,
-      hasTrustLanguage: false,
-      hasGalleryOrCaseStudy: false,
-      hasSocialLinks: false,
-      hasViewport: false,
-      isHttps: false,
-      htmlBytes: 0,
-      fetchMs: 0,
+      sourceIds,
+      h1Count: null,
+      headingCount: null,
+      wordCount: null,
+      ctaCount: null,
+      hasPhone: null,
+      hasEmail: null,
+      hasContactPage: null,
+      hasBookingOrQuote: null,
+      hasPricingPage: null,
+      hasServicesPage: null,
+      hasAboutOrTeamPage: null,
+      hasBlogOrNewsPage: null,
+      hasCareersPage: null,
+      hasTestimonials: null,
+      hasTrustLanguage: null,
+      hasGalleryOrCaseStudy: null,
+      hasSocialLinks: null,
+      hasViewport: null,
+      isHttps: null,
+      htmlBytes: null,
+      fetchMs: null,
       extractedLinks: [],
       socialLinks: {},
-      websiteScore: 0,
-      scoreBreakdown: { seo: 0, conversion: 0, trust: 0, content: 0, technical: 0 },
-      evidence: [
-        {
-          claim: `Website audit limited: ${reason}.`,
-          sourceType: "homepage",
-          confidence: "low",
-        },
-      ],
+      websiteScore: null,
+      scoreBreakdown: {
+        seo: null,
+        conversion: null,
+        trust: null,
+        content: null,
+        technical: null,
+      },
+      evidence: sourceIds.length
+        ? [
+            {
+              claim: `Website audit unavailable: ${reason}.`,
+              sourceUrl: url,
+              sourceType: "homepage",
+              sourceIds,
+              confidence: "low",
+            },
+          ]
+        : [],
     },
     pageTexts: [],
+    linkedPageAttempts: [],
+    accessedAt,
   };
 }
 
@@ -369,27 +444,67 @@ export async function auditWebsite(args: {
   url: string;
   businessType: string;
   market: string;
+  sourceId: SourceId;
+  signal?: AbortSignal;
+  budgetMs?: number;
 }): Promise<AuditResult> {
-  const { url, businessType, market } = args;
+  const { url, businessType, market, sourceId } = args;
+  const accessedAt = new Date().toISOString();
+  const deadlineAt = Date.now() + (args.budgetMs ?? 15_000);
+
+  if (args.signal?.aborted) {
+    return skippedAudit(
+      url,
+      "analysis time budget exhausted before website audit",
+      [sourceId],
+      accessedAt
+    );
+  }
 
   let normalized: string;
   try {
     normalized = normalizeHttpUrl(url);
   } catch {
-    return skippedAudit(url, "invalid URL");
+    return skippedAudit(url, "invalid URL", [sourceId], accessedAt);
   }
 
-  const cacheKey = `homepage:${normalized}`;
+  const cacheKey = `v3:homepage:${normalized}:${businessType.toLowerCase()}:${market.toLowerCase()}`;
   const cached = await readCache<AuditResult>(
     "homepages",
     cacheKey,
     CACHE_TTL.homepages
   );
-  if (cached) return cached;
+  if (
+    cached?.audit.auditStatus &&
+    cached.audit.websiteScore !== undefined &&
+    Array.isArray(cached.linkedPageAttempts) &&
+    typeof cached.accessedAt === "string" &&
+    !Number.isNaN(Date.parse(cached.accessedAt))
+  ) {
+    return {
+      audit: {
+        ...cached.audit,
+        sourceIds: [sourceId],
+        evidence: cached.audit.evidence.map((item) => ({
+          ...item,
+          sourceIds: [sourceId],
+        })),
+      },
+      pageTexts: cached.pageTexts.map((page) => ({
+        ...page,
+        sourceIds: [sourceId],
+      })),
+      linkedPageAttempts: cached.linkedPageAttempts,
+      accessedAt: cached.accessedAt,
+    };
+  }
 
-  const outcome = await safeFetchHtml(normalized);
+  const outcome = await safeFetchHtml(normalized, {
+    signal: args.signal,
+    budgetMs: remainingBudgetMs(deadlineAt),
+  });
   if (!outcome.ok) {
-    return skippedAudit(normalized, outcome.reason);
+    return skippedAudit(normalized, outcome.reason, [sourceId], accessedAt);
   }
 
   const parsedHome = parseHtml(outcome.html, outcome.finalUrl);
@@ -432,7 +547,12 @@ export async function auditWebsite(args: {
   const hasCareersPage = parsedHome.links.some((l) => l.type === "careers");
 
   const pageTexts: PageText[] = [
-    { url: outcome.finalUrl, text: parsedHome.bodyText, sourceType: "homepage" },
+    {
+      url: outcome.finalUrl,
+      text: parsedHome.bodyText,
+      sourceType: "homepage",
+      sourceIds: [sourceId],
+    },
   ];
 
   const evidence: EvidenceItem[] = [];
@@ -440,29 +560,48 @@ export async function auditWebsite(args: {
     claim: `Homepage fetched successfully in ${outcome.ms}ms.`,
     sourceUrl: outcome.finalUrl,
     sourceType: "homepage",
+    sourceIds: [sourceId],
     confidence: "high",
   });
 
   const linksToFollow = pickInternalLinksToFollow(parsedHome.links, baseHost);
+  const linkedPageAttempts: LinkedPageAttempt[] = [];
   let limitedAudit = false;
 
   for (const link of linksToFollow) {
-    const subOutcome = await safeFetchHtml(link.href);
+    const linkedAccessedAt = new Date().toISOString();
+    const subOutcome = await safeFetchHtml(link.href, {
+      signal: args.signal,
+      budgetMs: remainingBudgetMs(deadlineAt),
+    });
     if (subOutcome.ok) {
+      linkedPageAttempts.push({
+        url: subOutcome.finalUrl,
+        status: "used",
+        accessedAt: linkedAccessedAt,
+      });
       const parsedSub = parseHtml(subOutcome.html, subOutcome.finalUrl);
       pageTexts.push({
         url: subOutcome.finalUrl,
         text: parsedSub.bodyText,
         sourceType: "linked_page",
+        sourceIds: [sourceId],
       });
       evidence.push({
         claim: `Linked page (${link.type}) reviewed for additional public signals.`,
         sourceUrl: subOutcome.finalUrl,
         sourceType: "linked_page",
+        sourceIds: [sourceId],
         confidence: "medium",
       });
     } else {
       limitedAudit = true;
+      linkedPageAttempts.push({
+        url: link.href,
+        status: "unavailable",
+        reason: subOutcome.reason,
+        accessedAt: linkedAccessedAt,
+      });
     }
   }
 
@@ -505,8 +644,10 @@ export async function auditWebsite(args: {
   const audit: WebsiteAudit = {
     url,
     normalizedUrl: outcome.finalUrl,
+    auditStatus: limitedAudit ? "partial" : "complete",
     skipped: false,
     reason: limitedAudit ? "some linked pages could not be fetched" : undefined,
+    sourceIds: [sourceId],
     title: parsedHome.title,
     metaDescription: parsedHome.metaDescription,
     h1Count: parsedHome.h1Count,
@@ -537,7 +678,12 @@ export async function auditWebsite(args: {
     evidence,
   };
 
-  const result: AuditResult = { audit, pageTexts };
+  const result: AuditResult = {
+    audit,
+    pageTexts,
+    linkedPageAttempts,
+    accessedAt,
+  };
   await writeCache("homepages", cacheKey, result);
   return result;
 }

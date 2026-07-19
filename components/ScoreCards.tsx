@@ -8,9 +8,20 @@ function statusColor(status: MarketSummary["status"]) {
       return "bg-blue-100 text-blue-800 border-blue-200";
     case "behind but recoverable":
       return "bg-amber-100 text-amber-800 border-amber-200";
-    default:
+    case "low visibility":
       return "bg-red-100 text-red-800 border-red-200";
+    default:
+      return "bg-slate-100 text-slate-600 border-slate-200";
   }
+}
+
+function metric(value: number | null, suffix = ""): string {
+  return value === null ? "N/A" : `${value}${suffix}`;
+}
+
+function signedMetric(value: number | null): string {
+  if (value === null) return "N/A";
+  return `${value >= 0 ? "+" : ""}${value}`;
 }
 
 function Card({
@@ -44,17 +55,21 @@ export default function ScoreCards({
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
       <Card
         label="Your final score"
-        value={`${user.finalScore}/100`}
-        sub={`Website ${user.websiteAudit.websiteScore} · Local ${user.localPresenceScore}`}
+        value={metric(user.finalScore, "/100")}
+        sub={`Website ${metric(user.websiteAudit.websiteScore)} · Local ${metric(user.localPresenceScore)}`}
       />
       <Card
         label="Market rank"
-        value={`#${summary.yourRank} of ${summary.competitorCount + 1}`}
+        value={
+          summary.yourRank === null
+            ? "N/A"
+            : `#${summary.yourRank} of ${summary.auditedCompetitorCount + 1}`
+        }
       />
       <Card
         label="Market gap"
-        value={`${summary.marketGap >= 0 ? "+" : ""}${summary.marketGap}`}
-        sub="vs. competitor average"
+        value={signedMetric(summary.marketGap)}
+        sub={`Competitor average ${metric(summary.competitorAverageFinalScore, "/100")}`}
       />
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -65,7 +80,7 @@ export default function ScoreCards({
             summary.status
           )}`}
         >
-          {summary.status}
+          {summary.status ?? "N/A"}
         </span>
       </div>
     </div>

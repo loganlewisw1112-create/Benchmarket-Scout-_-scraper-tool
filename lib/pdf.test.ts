@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildFilename, sanitizeFilenamePart } from "./pdf";
+import {
+  buildFilename,
+  buildSourcesAppendixRows,
+  formatPdfMetric,
+  formatPdfSourceMarkers,
+  sanitizeFilenamePart,
+} from "./pdf";
 
 describe("sanitizeFilenamePart", () => {
   it("lowercases and converts spaces to hyphens", () => {
@@ -44,5 +50,59 @@ describe("buildFilename", () => {
     expect(filename.slice(0, 96)).toBe(
       `benchmark-scout-${longName.toLowerCase()}-austin-tx-2026-07-09`.slice(0, 96)
     );
+  });
+});
+
+describe("real-only report formatting", () => {
+  it("renders nullable and signed metrics without leaking null", () => {
+    expect(formatPdfMetric(null, { suffix: "/100" })).toBe("N/A");
+    expect(formatPdfMetric(0, { signed: true })).toBe("+0");
+    expect(formatPdfMetric(-4, { signed: true })).toBe("-4");
+  });
+
+  it("formats stable source citation markers", () => {
+    expect(formatPdfSourceMarkers(["S1", "S3"])).toBe("[S1] [S3]");
+    expect(formatPdfSourceMarkers([])).toBe("");
+  });
+
+  it("includes every provenance field in source appendix rows", () => {
+    const rows = buildSourcesAppendixRows([
+      {
+        id: "S1",
+        kind: "user_input",
+        provider: "Submitted request",
+        title: "Submitted business",
+        accessedAt: "2026-07-19T08:00:00.000Z",
+        status: "used",
+      },
+      {
+        id: "S2",
+        kind: "homepage",
+        provider: "Public website",
+        title: "Business homepage",
+        url: "https://example.org/",
+        accessedAt: "2026-07-19T08:00:01.000Z",
+        status: "limited",
+      },
+    ]);
+
+    expect(rows).toEqual([
+      [
+        "[S1]",
+        "Submitted request",
+        "Submitted business",
+        "N/A",
+        "2026-07-19T08:00:00.000Z",
+        "used",
+      ],
+      [
+        "[S2]",
+        "Public website",
+        "Business homepage",
+        "https://example.org/",
+        "2026-07-19T08:00:01.000Z",
+        "limited",
+      ],
+    ]);
   });
 });

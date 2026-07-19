@@ -1,3 +1,11 @@
+import { SourceUnavailableError } from "./pipeline-errors";
+import {
+  abortableDelay,
+  createTimedSignal,
+  remainingBudgetMs,
+  type RequestBudgetOptions,
+} from "./time-budget";
+
 export type OsmTagPair = [string, string];
 
 /**
@@ -7,9 +15,8 @@ export type OsmTagPair = [string, string];
  *              matched a curated keyword in {@link OSM_CATEGORY_MAP}.
  *   - "probe": no keyword matched, so the remaining meaningful words are tried
  *              as literal OSM tag values across the common feature keys.
- *   - "none":  the honest floor — nothing usable to query. Callers should NOT
- *              fabricate competitors; they fall back to clearly-labeled demo
- *              rows and a data-quality note naming the unmatched industry.
+ *   - "none":  the honest floor — nothing usable to query. Callers should not
+ *              fabricate competitors; they surface a valid zero-result run.
  */
 export type ResolutionStage = "map" | "probe" | "none";
 
@@ -810,7 +817,7 @@ function normalizeTokens(input: string): string[] {
  *   underscored phrase, e.g. "car wash" -> "car_wash") are emitted as literal
  *   values across {@link PROBE_KEYS}, catching the long tail without map upkeep.
  * Stage 3 (none): nothing meaningful to query. Tags are empty; the caller must
- *   fall back to labeled demo rows rather than fabricate competitors.
+ *   surface a valid zero-result run rather than fabricate competitors.
  */
 export function resolveIndustry(businessType: string): IndustryResolution {
   const tokens = normalizeTokens(businessType);
@@ -897,8 +904,8 @@ const OVERPASS_ENDPOINTS = [
 ];
 
 const ATTEMPTS_PER_ENDPOINT = 2;
-const PER_REQUEST_TIMEOUT_MS = 15000;
-const RETRY_BACKOFF_MS = 800;
+const PER_REQUEST_TIMEOUT_MS = 1_350;
+const RETRY_BACKOFF_MS = 200;
 
 // Staged resolution (esp. the direct-tag probe) can produce many candidate tag
 // clauses. Cap them so a single Overpass request stays polite and fast; the
@@ -909,16 +916,22 @@ const MAX_TAG_CLAUSES = 24;
 // while still keeping the response small.
 const OUTPUT_LIMIT = 50;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+export type OverpassQueryResult = {
+  elements: OverpassElement[];
+  queryPerformed: boolean;
+  endpoint?: string;
+  accessedAt: string;
+};
 
 async function fetchOverpassOnce(
   endpoint: string,
-  query: string
-): Promise<OverpassElement[]> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PER_REQUEST_TIMEOUT_MS);
+  query: string,
+  options: RequestBudgetOptions
+): Promise<{ elements: OverpassElement[]; accessedAt: string }> {
+  const timed = createTimedSignal(
+    options.signal,
+    Math.min(PER_REQUEST_TIMEOUT_MS, options.budgetMs ?? PER_REQUEST_TIMEOUT_MS)
+  );
 
   try {
     const res = await fetch(endpoint, {
@@ -929,7 +942,7 @@ async function fetchOverpassOnce(
         Accept: "application/json",
       },
       body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
+      signal: timed.signal,
     });
 
     if (!res.ok) {
@@ -937,32 +950,49 @@ async function fetchOverpassOnce(
     }
 
     const text = await res.text();
-    let data: { elements?: OverpassElement[] };
+    let data: unknown;
     try {
       data = JSON.parse(text);
     } catch {
       throw new Error(`Overpass (${endpoint}) returned a non-JSON response`);
     }
-
-    return data.elements ?? [];
+    if (
+      !data ||
+      typeof data !== "object" ||
+      !Array.isArray((data as { elements?: unknown }).elements)
+    ) {
+      throw new Error(
+        `Overpass (${endpoint}) returned a malformed payload without an elements array`
+      );
+    }
+    return {
+      elements: (data as { elements: OverpassElement[] }).elements,
+      accessedAt: new Date().toISOString(),
+    };
   } finally {
-    clearTimeout(timeout);
+    timed.cleanup();
   }
 }
 
-export async function queryOverpass(
+export async function queryOverpassDetailed(
   businessType: string,
   lat: number,
   lon: number,
-  radiusMeters = 12000
-): Promise<OverpassElement[]> {
+  radiusMeters = 12000,
+  options: RequestBudgetOptions = {}
+): Promise<OverpassQueryResult> {
+  const deadlineAt = Date.now() + (options.budgetMs ?? 15_000);
   const tagPairs = resolveOsmTags(businessType);
 
   // Honest floor: nothing resolved to a live OSM tag, so there is nothing to
   // query. Return no elements rather than firing a near-dead `shop=yes` query;
-  // the caller then surfaces labeled demo rows and a data-quality note.
+  // the caller then records a valid zero-result discovery.
   if (tagPairs.length === 0) {
-    return [];
+    return {
+      elements: [],
+      queryPerformed: false,
+      accessedAt: new Date().toISOString(),
+    };
   }
 
   const clauses = tagPairs
@@ -983,19 +1013,59 @@ out center tags ${OUTPUT_LIMIT};`;
 
   for (const endpoint of OVERPASS_ENDPOINTS) {
     for (let attempt = 1; attempt <= ATTEMPTS_PER_ENDPOINT; attempt++) {
+      const remaining = remainingBudgetMs(deadlineAt);
+      if (options.signal?.aborted || remaining === 0) {
+        lastError =
+          options.signal?.reason ?? new Error("Overpass time budget exhausted");
+        break;
+      }
       try {
-        return await fetchOverpassOnce(endpoint, query);
+        const result = await fetchOverpassOnce(endpoint, query, {
+          signal: options.signal,
+          budgetMs: remaining,
+        });
+        return {
+          ...result,
+          queryPerformed: true,
+          endpoint,
+        };
       } catch (err) {
         lastError = err;
         const isLastAttemptOnEndpoint = attempt === ATTEMPTS_PER_ENDPOINT;
-        if (!isLastAttemptOnEndpoint) {
-          await sleep(RETRY_BACKOFF_MS * attempt);
+        if (!isLastAttemptOnEndpoint && !options.signal?.aborted) {
+          await abortableDelay(
+            Math.min(
+              RETRY_BACKOFF_MS * attempt,
+              remainingBudgetMs(deadlineAt)
+            ),
+            options.signal
+          );
         }
       }
     }
   }
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Overpass discovery failed across all endpoints and retries");
+  throw new SourceUnavailableError(
+    "overpass",
+    "Competitor discovery is temporarily unavailable.",
+    lastError
+  );
+}
+
+export async function queryOverpass(
+  businessType: string,
+  lat: number,
+  lon: number,
+  radiusMeters = 12000,
+  options: RequestBudgetOptions = {}
+): Promise<OverpassElement[]> {
+  return (
+    await queryOverpassDetailed(
+      businessType,
+      lat,
+      lon,
+      radiusMeters,
+      options
+    )
+  ).elements;
 }

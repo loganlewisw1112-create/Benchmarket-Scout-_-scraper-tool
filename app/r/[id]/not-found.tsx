@@ -9,6 +9,14 @@ export const metadata: Metadata = {
   title: "Report not found",
   description:
     "This shared Benchmark Scout report is unavailable or may have expired.",
+  robots: { index: false, follow: false },
+  openGraph: {
+    title: "Report not found",
+    description:
+      "This shared Benchmark Scout report is unavailable or may have expired.",
+    siteName: "Benchmark Scout",
+    type: "website",
+  },
 };
 
 export default function SharedReportNotFound() {

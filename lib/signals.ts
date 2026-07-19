@@ -1,4 +1,11 @@
-import type { MarketSignal, SignalScan, SocialLinks } from "./types";
+import { dedupeSourceIds } from "./provenance";
+import type {
+  AuditStatus,
+  MarketSignal,
+  SignalScan,
+  SocialLinks,
+  SourceId,
+} from "./types";
 import type { PageText } from "./audit";
 
 export const KEYWORDS = {
@@ -112,8 +119,9 @@ function findKeywordHits(text: string, keywords: readonly string[]): string[] {
 function hitsToSignals(
   hits: string[],
   label: string,
-  sourceUrl: string | undefined,
-  sourceType: MarketSignal["sourceType"]
+  sourceUrl: string,
+  sourceType: MarketSignal["sourceType"],
+  sourceIds: SourceId[]
 ): MarketSignal[] {
   if (hits.length === 0) return [];
   return [
@@ -122,6 +130,7 @@ function hitsToSignals(
       evidence: `Public page text includes: "${hits.slice(0, 3).join('", "')}".`,
       sourceUrl,
       sourceType,
+      sourceIds,
       confidence: hits.length > 1 ? "medium" : "low",
     },
   ];
@@ -129,66 +138,76 @@ function hitsToSignals(
 
 export function extractMomentumSignals(
   text: string,
-  sourceUrl?: string,
-  sourceType: MarketSignal["sourceType"] = "homepage"
+  sourceUrl: string,
+  sourceType: MarketSignal["sourceType"] = "homepage",
+  sourceIds: SourceId[] = []
 ): MarketSignal[] {
   return hitsToSignals(
     findKeywordHits(text, KEYWORDS.momentum),
     "Momentum language detected",
     sourceUrl,
-    sourceType
+    sourceType,
+    sourceIds
   );
 }
 
 export function extractRiskSignals(
   text: string,
-  sourceUrl?: string,
-  sourceType: MarketSignal["sourceType"] = "homepage"
+  sourceUrl: string,
+  sourceType: MarketSignal["sourceType"] = "homepage",
+  sourceIds: SourceId[] = []
 ): MarketSignal[] {
   return hitsToSignals(
     findKeywordHits(text, KEYWORDS.risk),
     "Possible risk language detected",
     sourceUrl,
-    sourceType
+    sourceType,
+    sourceIds
   );
 }
 
 export function extractChangeSignals(
   text: string,
-  sourceUrl?: string,
-  sourceType: MarketSignal["sourceType"] = "homepage"
+  sourceUrl: string,
+  sourceType: MarketSignal["sourceType"] = "homepage",
+  sourceIds: SourceId[] = []
 ): MarketSignal[] {
   return hitsToSignals(
     findKeywordHits(text, KEYWORDS.change),
     "Possible company change language detected",
     sourceUrl,
-    sourceType
+    sourceType,
+    sourceIds
   );
 }
 
 export function extractOfferSignals(
   text: string,
-  sourceUrl?: string,
-  sourceType: MarketSignal["sourceType"] = "homepage"
+  sourceUrl: string,
+  sourceType: MarketSignal["sourceType"] = "homepage",
+  sourceIds: SourceId[] = []
 ): MarketSignal[] {
   return hitsToSignals(
     findKeywordHits(text, KEYWORDS.offer),
     "Promotional offer language detected",
     sourceUrl,
-    sourceType
+    sourceType,
+    sourceIds
   );
 }
 
 export function extractHiringSignals(
   text: string,
-  sourceUrl?: string,
-  sourceType: MarketSignal["sourceType"] = "homepage"
+  sourceUrl: string,
+  sourceType: MarketSignal["sourceType"] = "homepage",
+  sourceIds: SourceId[] = []
 ): MarketSignal[] {
   return hitsToSignals(
     findKeywordHits(text, KEYWORDS.hiring),
     "Hiring-related language detected",
     sourceUrl,
-    sourceType
+    sourceType,
+    sourceIds
   );
 }
 
@@ -206,7 +225,8 @@ const SOCIAL_PATTERNS: Array<{
 
 export function buildSignalScanFromPageTexts(
   pageTexts: PageText[],
-  socialLinks: SocialLinks
+  socialLinks: SocialLinks,
+  auditStatus: AuditStatus
 ): SignalScan {
   const momentumSignals: MarketSignal[] = [];
   const riskSignals: MarketSignal[] = [];
@@ -216,19 +236,33 @@ export function buildSignalScanFromPageTexts(
 
   for (const page of pageTexts) {
     momentumSignals.push(
-      ...extractMomentumSignals(page.text, page.url, page.sourceType)
+      ...extractMomentumSignals(
+        page.text,
+        page.url,
+        page.sourceType,
+        page.sourceIds
+      )
     );
-    riskSignals.push(...extractRiskSignals(page.text, page.url, page.sourceType));
+    riskSignals.push(
+      ...extractRiskSignals(page.text, page.url, page.sourceType, page.sourceIds)
+    );
     changeSignals.push(
-      ...extractChangeSignals(page.text, page.url, page.sourceType)
+      ...extractChangeSignals(page.text, page.url, page.sourceType, page.sourceIds)
     );
-    offerSignals.push(...extractOfferSignals(page.text, page.url, page.sourceType));
+    offerSignals.push(
+      ...extractOfferSignals(page.text, page.url, page.sourceType, page.sourceIds)
+    );
     hiringSignals.push(
-      ...extractHiringSignals(page.text, page.url, page.sourceType)
+      ...extractHiringSignals(page.text, page.url, page.sourceType, page.sourceIds)
     );
   }
 
   return {
+    auditStatus,
+    newsStatus: "not_requested",
+    sourceIds: dedupeSourceIds(
+      pageTexts.flatMap((page) => page.sourceIds)
+    ),
     socialLinks,
     momentumSignals,
     riskSignals,
@@ -236,9 +270,9 @@ export function buildSignalScanFromPageTexts(
     offerSignals,
     hiringSignals,
     newsSignals: [],
-    momentumScore: 0,
-    riskScore: 0,
-    changeScore: 0,
+    momentumScore: auditStatus === "unavailable" ? null : 0,
+    riskScore: auditStatus === "unavailable" ? null : 0,
+    changeScore: auditStatus === "unavailable" ? null : 0,
   };
 }
 

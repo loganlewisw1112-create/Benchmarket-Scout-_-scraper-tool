@@ -2,14 +2,13 @@ import { NextResponse } from "next/server";
 import { enforceGuard } from "@/lib/api-guard";
 import { logger, serializeError, withRequestId } from "@/lib/logger";
 import { isMaintenanceMode, MAINTENANCE_RESPONSE } from "@/lib/maintenance";
-import { generateSampleReport } from "@/lib/sample-report";
-import { saveReport } from "@/lib/store";
+import { selectRandomActiveSample } from "@/lib/sample-pool";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Same access-code + rate-limit gate as /api/analyze-market. No request
-// body — every call is a fresh, randomly generated sample.
+// Same access-code + rate-limit gate as /api/analyze-market. This route only
+// reads a pre-generated real-data snapshot; it never runs the analysis pipeline.
 export async function GET(request: Request) {
   if (isMaintenanceMode()) {
     return NextResponse.json(MAINTENANCE_RESPONSE, {
@@ -41,27 +40,36 @@ export async function GET(request: Request) {
     }
 
     try {
-      const result = await generateSampleReport();
-
-      // Persist for the shareable read-only view, same as a real analysis.
-      // Best-effort: a store failure must never break the sample response.
-      let reportId: string | undefined;
-      try {
-        reportId = await saveReport(result);
-      } catch (err) {
-        logger.warn("sample-report save failed", serializeError(err));
+      const exclude = new URL(request.url).searchParams.get("exclude") ?? undefined;
+      const snapshot = await selectRandomActiveSample(exclude);
+      if (!snapshot) {
+        logger.warn("sample-report unavailable", { exclude });
+        return NextResponse.json(
+          {
+            code: "REAL_SAMPLE_UNAVAILABLE",
+            error: "No current verified sample report is available.",
+          },
+          {
+            status: 503,
+            headers: { "Retry-After": "3600", "x-request-id": requestId },
+          }
+        );
       }
 
       logger.info("sample-report request completed", {
         durationMs: Date.now() - startedAt,
         status: 200,
-        businessType: result.input.businessType,
-        market: result.input.market,
-        reportSaved: reportId !== undefined,
+        sampleId: snapshot.sampleId,
+        reportId: snapshot.reportId,
       });
 
       return NextResponse.json(
-        { ...result, reportId },
+        {
+          sampleId: snapshot.sampleId,
+          reportId: snapshot.reportId,
+          generatedAt: snapshot.generatedAt,
+          report: snapshot.report,
+        },
         { status: 200, headers: { "x-request-id": requestId } }
       );
     } catch (err) {
@@ -70,8 +78,14 @@ export async function GET(request: Request) {
         durationMs: Date.now() - startedAt,
       });
       return NextResponse.json(
-        { error: "Could not generate a sample report. Please try again." },
-        { status: 500, headers: { "x-request-id": requestId } }
+        {
+          code: "REAL_SAMPLE_UNAVAILABLE",
+          error: "No current verified sample report is available.",
+        },
+        {
+          status: 503,
+          headers: { "Retry-After": "3600", "x-request-id": requestId },
+        }
       );
     }
   });

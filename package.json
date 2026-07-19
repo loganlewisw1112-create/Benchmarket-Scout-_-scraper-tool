@@ -1,9 +1,12 @@
 {
   "name": "benchmark-scout",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "check:real-data-only": "node scripts/check-real-data-only.mjs",
+    "gate:preview": "node scripts/run-alameda-gate.mjs",
+    "prebuild": "npm run check:real-data-only",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -22,6 +25,7 @@
     "p-limit": "^7.3.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
+    "undici": "^7.28.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

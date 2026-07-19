@@ -33,34 +33,38 @@ export type CategoryComparison = {
   totalCompetitors: number;
 };
 
+function categoryScore(
+  report: CompetitorReport,
+  category: CategoryKey
+): number | null {
+  return report.websiteAudit.scoreBreakdown[category];
+}
+
 export function computeCategoryComparisons(
   user: CompetitorReport,
   competitors: CompetitorReport[]
 ): CategoryComparison[] {
-  const categories = Object.keys(CATEGORY_MAX_SCORES) as CategoryKey[];
-  const total = competitors.length || 1;
-
-  return categories.map((category) => {
-    const userScore = user.websiteAudit.scoreBreakdown[category];
-    const avg =
-      competitors.reduce(
-        (sum, c) => sum + c.websiteAudit.scoreBreakdown[category],
-        0
-      ) / total;
-    const competitorsAhead = competitors.filter(
-      (c) => c.websiteAudit.scoreBreakdown[category] > userScore
-    ).length;
-
-    return {
-      category,
-      userScore,
-      maxScore: CATEGORY_MAX_SCORES[category],
-      competitorAverage: Math.round(avg * 10) / 10,
-      gap: Math.round((avg - userScore) * 10) / 10,
-      competitorsAhead,
-      totalCompetitors: competitors.length,
-    };
-  });
+  return (Object.keys(CATEGORY_MAX_SCORES) as CategoryKey[]).flatMap(
+    (category) => {
+      const userScore = categoryScore(user, category);
+      const scores = competitors
+        .map((competitor) => categoryScore(competitor, category))
+        .filter((score): score is number => score !== null);
+      if (userScore === null || scores.length === 0) return [];
+      const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+      return [
+        {
+          category,
+          userScore,
+          maxScore: CATEGORY_MAX_SCORES[category],
+          competitorAverage: Math.round(average * 10) / 10,
+          gap: Math.round((average - userScore) * 10) / 10,
+          competitorsAhead: scores.filter((score) => score > userScore).length,
+          totalCompetitors: scores.length,
+        },
+      ];
+    }
+  );
 }
 
 export type AdoptionStat = {
@@ -68,7 +72,7 @@ export type AdoptionStat = {
   label: string;
   competitorAdoptionCount: number;
   totalCompetitors: number;
-  userHasIt: boolean;
+  userHasIt: boolean | null;
 };
 
 export function computeAdoptionStats(
@@ -78,45 +82,52 @@ export function computeAdoptionStats(
   const checks: Array<{
     key: string;
     label: string;
-    getter: (c: CompetitorReport) => boolean;
+    getter: (report: CompetitorReport) => boolean | null;
   }> = [
     {
       key: "testimonials",
       label: "visible testimonials or client reviews",
-      getter: (c) => c.websiteAudit.hasTestimonials,
+      getter: (report) => report.websiteAudit.hasTestimonials,
     },
     {
       key: "booking",
       label: "a visible booking or quote request path",
-      getter: (c) => c.websiteAudit.hasBookingOrQuote,
+      getter: (report) => report.websiteAudit.hasBookingOrQuote,
     },
     {
       key: "social",
       label: "a linked social profile",
-      getter: (c) => c.websiteAudit.hasSocialLinks,
+      getter: (report) => report.websiteAudit.hasSocialLinks,
     },
     {
       key: "services",
       label: "a dedicated services page",
-      getter: (c) => c.websiteAudit.hasServicesPage,
+      getter: (report) => report.websiteAudit.hasServicesPage,
     },
     {
       key: "momentum",
       label: "public momentum, hiring, or offer language",
-      getter: (c) =>
-        c.signals.momentumSignals.length > 0 ||
-        c.signals.offerSignals.length > 0 ||
-        c.signals.hiringSignals.length > 0,
+      getter: (report) =>
+        report.signals.auditStatus === "unavailable"
+          ? null
+          : report.signals.momentumSignals.length > 0 ||
+            report.signals.offerSignals.length > 0 ||
+            report.signals.hiringSignals.length > 0,
     },
   ];
 
-  return checks.map((check) => ({
-    key: check.key,
-    label: check.label,
-    competitorAdoptionCount: competitors.filter(check.getter).length,
-    totalCompetitors: competitors.length,
-    userHasIt: check.getter(user),
-  }));
+  return checks.map((check) => {
+    const observed = competitors
+      .map(check.getter)
+      .filter((value): value is boolean => value !== null);
+    return {
+      key: check.key,
+      label: check.label,
+      competitorAdoptionCount: observed.filter(Boolean).length,
+      totalCompetitors: observed.length,
+      userHasIt: check.getter(user),
+    };
+  });
 }
 
 const CATEGORY_ADOPTION_KEY: Partial<Record<CategoryKey, string>> = {
@@ -130,91 +141,51 @@ export function adoptionStatForCategory(
   adoptionStats: AdoptionStat[]
 ): AdoptionStat | undefined {
   const key = CATEGORY_ADOPTION_KEY[category];
-  if (!key) return undefined;
-  return adoptionStats.find((s) => s.key === key);
+  return key ? adoptionStats.find((stat) => stat.key === key) : undefined;
 }
 
-export type CategoryUplift = {
-  category: CategoryKey;
-  currentRank: number;
-  projectedRank: number;
-  projectedFinalScore: number;
-  scoreDelta: number;
-};
-
-export function simulateCategoryUplift(
-  user: CompetitorReport,
-  competitors: CompetitorReport[],
-  category: CategoryKey
-): CategoryUplift | null {
-  const comparisons = computeCategoryComparisons(user, competitors);
-  const target = comparisons.find((c) => c.category === category);
-  if (!target || target.gap <= 0.5) return null;
-
-  const newCategoryScore = Math.min(
-    target.maxScore,
-    target.userScore + target.gap
-  );
-  const scoreDelta = Math.round(newCategoryScore - target.userScore);
-  const newWebsiteScore = Math.min(
-    100,
-    user.websiteAudit.websiteScore + scoreDelta
-  );
-
-  const projectedFinalScore = computeFinalScore({
-    websiteScore: newWebsiteScore,
-    localPresenceScore: user.localPresenceScore,
-    momentumScore: user.signals.momentumScore,
-    riskScore: user.signals.riskScore,
-  });
-
-  const currentRank =
-    user.rank ??
-    competitors.filter((c) => c.finalScore > user.finalScore).length + 1;
-  const projectedRank =
-    competitors.filter((c) => c.finalScore > projectedFinalScore).length + 1;
-
-  return {
-    category,
-    currentRank,
-    projectedRank,
-    projectedFinalScore,
-    scoreDelta,
-  };
-}
-
-export function computeMomentumScore(signals: SignalScan): number {
-  const socialLinkCount = Object.keys(signals.socialLinks).length;
+export function computeMomentumScore(signals: SignalScan): number | null {
+  if (signals.auditStatus === "unavailable") return null;
   return Math.min(
     100,
     signals.momentumSignals.length * 15 +
       signals.offerSignals.length * 8 +
       signals.hiringSignals.length * 10 +
       signals.newsSignals.length * 10 +
-      socialLinkCount * 4
+      Object.keys(signals.socialLinks).length * 4
   );
 }
 
-export function computeRiskScore(signals: SignalScan): number {
-  return Math.min(100, signals.riskSignals.length * 20);
+export function computeRiskScore(signals: SignalScan): number | null {
+  return signals.auditStatus === "unavailable"
+    ? null
+    : Math.min(100, signals.riskSignals.length * 20);
 }
 
-export function computeChangeScore(signals: SignalScan): number {
-  return Math.min(100, signals.changeSignals.length * 25);
+export function computeChangeScore(signals: SignalScan): number | null {
+  return signals.auditStatus === "unavailable"
+    ? null
+    : Math.min(100, signals.changeSignals.length * 25);
 }
 
 export function computeFinalScore(args: {
-  websiteScore: number;
-  localPresenceScore: number;
-  momentumScore: number;
-  riskScore: number;
-}): number {
-  const { websiteScore, localPresenceScore, momentumScore, riskScore } = args;
+  websiteScore: number | null;
+  localPresenceScore: number | null;
+  momentumScore: number | null;
+  riskScore: number | null;
+}): number | null {
+  const values = [
+    args.websiteScore,
+    args.localPresenceScore,
+    args.momentumScore,
+    args.riskScore,
+  ];
+  if (values.some((value) => value === null)) return null;
   return Math.round(
-    0.6 * websiteScore +
-      0.2 * localPresenceScore +
-      0.15 * momentumScore +
-      0.05 * (100 - riskScore)
+    0.6 * args.websiteScore! +
+      0.2 * args.localPresenceScore! +
+      0.15 * args.momentumScore! +
+      0.05 * (100 - args.riskScore!)
   );
 }
 
@@ -223,40 +194,52 @@ export function computeLocalPresenceScore(args: {
   hasPhoneOrEmail: boolean;
   hasAddressOrCoords: boolean;
   categoryMatch: boolean;
-  osmCompleteness: number; // 0-1
+  osmCompleteness: number;
 }): number {
   let score = 0;
   if (args.hasWebsite) score += 30;
   if (args.hasPhoneOrEmail) score += 20;
   if (args.hasAddressOrCoords) score += 20;
   if (args.categoryMatch) score += 20;
-  score += Math.round(args.osmCompleteness * 10);
+  score += Math.round(Math.max(0, Math.min(1, args.osmCompleteness)) * 10);
   return Math.min(100, score);
 }
 
-export function statusForScore(
-  score: number
-): MarketSummary["status"] {
+export function statusForScore(score: number): NonNullable<MarketSummary["status"]> {
   if (score >= 80) return "leading";
   if (score >= 65) return "competitive";
   if (score >= 45) return "behind but recoverable";
   return "low visibility";
 }
 
+export function isScored(report: CompetitorReport): boolean {
+  return report.auditStatus !== "unavailable" && report.finalScore !== null;
+}
+
 export function rankCompetitors(
   user: CompetitorReport,
   competitors: CompetitorReport[]
 ): { user: CompetitorReport; competitors: CompetitorReport[] } {
-  const all = [user, ...competitors].sort(
-    (a, b) => b.finalScore - a.finalScore
-  );
-  all.forEach((c, idx) => {
-    c.rank = idx + 1;
+  const all = [user, ...competitors];
+  all.forEach((report) => {
+    report.rank = null;
+  });
+  const scored = all
+    .filter(isScored)
+    .sort(
+      (left, right) =>
+        right.finalScore! - left.finalScore! || left.id.localeCompare(right.id)
+    );
+  scored.forEach((report, index) => {
+    report.rank = index + 1;
   });
 
   return {
-    user: all.find((c) => c.source === "user")!,
-    competitors: all.filter((c) => c.source !== "user"),
+    user,
+    competitors: [
+      ...competitors.filter(isScored).sort((a, b) => a.rank! - b.rank!),
+      ...competitors.filter((competitor) => !isScored(competitor)),
+    ],
   };
 }
 
@@ -264,43 +247,34 @@ export function buildMarketSummary(
   user: CompetitorReport,
   competitors: CompetitorReport[]
 ): MarketSummary {
-  const competitorCount = competitors.length;
-  const avgWebsite =
-    competitorCount > 0
-      ? competitors.reduce((sum, c) => sum + c.websiteAudit.websiteScore, 0) /
-        competitorCount
-      : 0;
-  const avgFinal =
-    competitorCount > 0
-      ? competitors.reduce((sum, c) => sum + c.finalScore, 0) /
-        competitorCount
-      : 0;
-
-  const strongest = [...competitors].sort(
-    (a, b) => b.finalScore - a.finalScore
-  )[0];
-
-  const marketGap = Math.round(user.finalScore - avgFinal);
-
-  let biggestOpportunity: string | undefined;
-  if (user.websiteAudit.scoreBreakdown) {
-    const breakdown = user.websiteAudit.scoreBreakdown;
-    const weakestArea = (
-      Object.entries(breakdown) as [string, number][]
-    ).sort((a, b) => a[1] - b[1])[0];
-    if (weakestArea) {
-      biggestOpportunity = weakestArea[0];
-    }
-  }
+  const scored = competitors.filter(isScored);
+  const averageWebsite = scored.length
+    ? scored.reduce((sum, report) => sum + report.websiteAudit.websiteScore!, 0) /
+      scored.length
+    : null;
+  const averageFinal = scored.length
+    ? scored.reduce((sum, report) => sum + report.finalScore!, 0) / scored.length
+    : null;
+  const strongest = scored[0];
+  const marketGap =
+    user.finalScore !== null && averageFinal !== null
+      ? Math.round(user.finalScore - averageFinal)
+      : null;
+  const availableBreakdown = Object.entries(user.websiteAudit.scoreBreakdown)
+    .filter((entry): entry is [string, number] => entry[1] !== null)
+    .sort((left, right) => left[1] - right[1]);
 
   return {
-    competitorCount,
-    competitorAverageWebsiteScore: Math.round(avgWebsite),
-    competitorAverageFinalScore: Math.round(avgFinal),
-    yourRank: user.rank ?? 1,
+    competitorCount: competitors.length,
+    auditedCompetitorCount: scored.length,
+    competitorAverageWebsiteScore:
+      averageWebsite === null ? null : Math.round(averageWebsite),
+    competitorAverageFinalScore:
+      averageFinal === null ? null : Math.round(averageFinal),
+    yourRank: user.rank,
     marketGap,
-    status: statusForScore(user.finalScore),
+    status: user.finalScore === null ? null : statusForScore(user.finalScore),
     strongestCompetitor: strongest?.name,
-    biggestOpportunity,
+    biggestOpportunity: availableBreakdown[0]?.[0],
   };
 }

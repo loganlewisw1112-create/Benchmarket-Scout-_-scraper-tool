@@ -11,28 +11,26 @@ export const analyzeMarketRequestSchema = z.object({
     .string()
     .min(2)
     .max(80)
-    .transform(stripDangerousChars),
+    .transform(stripDangerousChars)
+    .pipe(z.string().min(2)),
   businessUrl: z
     .string()
-    .min(3)
     .max(300)
-    .transform((v) => v.trim()),
+    .transform((v) => v.trim())
+    .pipe(z.url().refine((url) => /^https?:\/\//i.test(url), "Use an HTTP(S) URL")),
   businessType: z
     .string()
     .min(2)
     .max(80)
-    .transform(stripDangerousChars),
+    .transform(stripDangerousChars)
+    .pipe(z.string().min(2)),
   market: z
     .string()
     .min(2)
     .max(120)
-    .transform(stripDangerousChars),
-  options: z
-    .object({
-      demoMode: z.enum(["live", "auto", "mock"]).optional(),
-    })
-    .optional(),
-});
+    .transform(stripDangerousChars)
+    .pipe(z.string().min(2)),
+}).strict();
 
 export type ValidatedAnalyzeMarketRequest = z.infer<
   typeof analyzeMarketRequestSchema

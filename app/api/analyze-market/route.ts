@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { analyzeMarket } from "@/lib/analyze-market";
 import { enforceGlobalAnalyzeLimit, enforceGuard } from "@/lib/api-guard";
+import { assertRealDataResponse, RealDataInvariantError } from "@/lib/invariants";
 import { logger, serializeError, withRequestId } from "@/lib/logger";
 import { isMaintenanceMode, MAINTENANCE_RESPONSE } from "@/lib/maintenance";
+import { PipelineError } from "@/lib/pipeline-errors";
 import { saveReport } from "@/lib/store";
 import { validateAnalyzeMarketRequest } from "@/lib/validation";
 
@@ -85,21 +87,35 @@ export async function POST(request: Request) {
     try {
       const result = await analyzeMarket(parsed.data);
 
-      // Persist for the shareable read-only view. Best-effort: a store failure
-      // must never turn a successful analysis into an error for the user.
-      let reportId: string | undefined;
+      // The route is the final fail-closed boundary before any v2 payload is
+      // persisted or returned. saveReport repeats the same invariant before
+      // writing the versioned key.
+      assertRealDataResponse(result);
+      let reportId: string;
       try {
         reportId = await saveReport(result);
       } catch (err) {
-        logger.warn("analyze-market report save failed", serializeError(err));
+        logger.error("analyze-market report save failed", serializeError(err));
+        return NextResponse.json(
+          {
+            error: "The verified report could not be saved. Please retry.",
+            code: "SOURCE_UNAVAILABLE",
+            retryable: true,
+          },
+          {
+            status: 503,
+            headers: { "x-request-id": requestId, "Retry-After": "60" },
+          }
+        );
       }
 
       logger.info("analyze-market request completed", {
         durationMs: Date.now() - startedAt,
         status: 200,
-        usedMockData: result.dataQuality.usedMockData,
-        discoverySource: result.dataQuality.discoverySource,
-        reportSaved: reportId !== undefined,
+        coverageStatus: result.dataQuality.coverageStatus,
+        realCompetitorsFound: result.dataQuality.realCompetitorsFound,
+        scoredCompetitors: result.dataQuality.scoredCompetitors,
+        reportSaved: true,
       });
       return NextResponse.json(
         { ...result, reportId },
@@ -110,10 +126,31 @@ export async function POST(request: Request) {
         ...serializeError(err),
         durationMs: Date.now() - startedAt,
       });
+      if (err instanceof PipelineError) {
+        const headers: Record<string, string> = { "x-request-id": requestId };
+        if (err.retryable) headers["Retry-After"] = "60";
+        return NextResponse.json(
+          {
+            error: err.message,
+            code: err.code,
+            retryable: err.retryable,
+          },
+          { status: err.status, headers }
+        );
+      }
+      if (err instanceof RealDataInvariantError) {
+        return NextResponse.json(
+          {
+            error: "The report failed the real-data provenance safety check.",
+            code: "REAL_DATA_INVARIANT_FAILED",
+          },
+          { status: 500, headers: { "x-request-id": requestId } }
+        );
+      }
       return NextResponse.json(
         {
-          error:
-            "Analysis failed unexpectedly. Please try again, or the app will use fallback demo data.",
+          error: "Analysis failed unexpectedly. Please try again.",
+          code: "ANALYSIS_FAILED",
         },
         { status: 500, headers: { "x-request-id": requestId } }
       );

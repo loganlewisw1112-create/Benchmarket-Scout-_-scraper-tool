@@ -3,20 +3,20 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ResultsDashboard from "@/components/ResultsDashboard";
+import LegacyReportUnavailable from "@/components/LegacyReportUnavailable";
 import MaintenancePage from "@/components/MaintenancePage";
 import WaitlistForm from "@/components/WaitlistForm";
-import { getReport } from "@/lib/store";
+import { readReportV2 } from "@/lib/store";
 import { isMaintenanceMode } from "@/lib/maintenance";
-import type { AnalyzeMarketResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// getReport hits the KV store / filesystem directly (not `fetch`), so it
+// readReportV2 hits the KV store / filesystem directly (not `fetch`), so it
 // isn't covered by Next's automatic fetch memoization. Wrapping it in React's
 // `cache()` dedupes the lookup between `generateMetadata` and the page
 // component for a single request, avoiding a true double-fetch.
-const getCachedReport = cache(getReport);
+const getCachedReport = cache(readReportV2);
 
 const SITE_NAME = "Benchmark Scout";
 
@@ -41,14 +41,32 @@ export async function generateMetadata({
   const { id } = await params;
   const stored = await getCachedReport(id);
 
-  if (!stored) {
+  if (stored.status !== "ok") {
+    if (stored.status === "missing") {
+      return {
+        title: "Report not found",
+        description: `This shared ${SITE_NAME} report is unavailable or may have expired.`,
+        robots: { index: false, follow: false },
+      };
+    }
+
+    const title = `Report unavailable | ${SITE_NAME}`;
+    const description = `This shared ${SITE_NAME} report cannot be displayed under the current verified-source standard.`;
     return {
-      title: "Report not found",
-      description: `This shared ${SITE_NAME} report is unavailable or may have expired.`,
+      title,
+      description,
+      robots: { index: false, follow: false },
+      openGraph: {
+        title,
+        description,
+        siteName: SITE_NAME,
+        type: "article",
+      },
+      twitter: { card: "summary", title, description },
     };
   }
 
-  const data = stored.report as AnalyzeMarketResponse;
+  const data = stored.value.report;
   const businessName = data?.input?.businessName?.trim() || "This business";
   const marketLabel = data?.market?.label || data?.input?.market || "its market";
 
@@ -61,6 +79,7 @@ export async function generateMetadata({
   return {
     title,
     description,
+    robots: { index: false, follow: false },
     openGraph: {
       title,
       description,
@@ -84,11 +103,14 @@ export default async function SharedReportPage({
 
   const { id } = await params;
   const stored = await getCachedReport(id);
-  if (!stored) notFound();
+  if (stored.status !== "ok") {
+    if (stored.status === "missing") notFound();
+    return <LegacyReportUnavailable status={stored.status} />;
+  }
 
-  const data = stored.report as AnalyzeMarketResponse;
-  const created = new Date(stored.createdAt);
-  const marketLabel = data?.market?.label ? `${data.market.label} - ` : "";
+  const data = stored.value.report;
+  const created = new Date(stored.value.createdAt);
+  const marketLabel = data.market.label ? `${data.market.label} - ` : "";
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -99,7 +121,7 @@ export default async function SharedReportPage({
               Shared report
             </p>
             <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
-              {data?.input?.businessName ?? "Benchmark Scout report"}
+              {data.input.businessName}
             </h1>
             <p className="mt-1 text-sm text-slate-500">
               {marketLabel}

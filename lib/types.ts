@@ -1,13 +1,33 @@
-export type DemoMode = "live" | "auto" | "mock";
-
 export type AnalyzeMarketRequest = {
   businessName: string;
   businessUrl: string;
   businessType: string;
   market: string;
-  options?: {
-    demoMode?: DemoMode;
-  };
+};
+
+export type SourceId = `S${number}`;
+export type AuditStatus = "complete" | "partial" | "unavailable";
+export type SourceReference = {
+  id: SourceId;
+  kind:
+    | "user_input"
+    | "nominatim"
+    | "openstreetmap"
+    | "homepage"
+    | "linked_page"
+    | "news_article";
+  provider: string;
+  title: string;
+  url?: string;
+  businessName?: string;
+  accessedAt: string;
+  status: "used" | "limited" | "unavailable";
+};
+
+export type Provenance = {
+  policy: "real-only";
+  containsSyntheticData: false;
+  sources: SourceReference[];
 };
 
 export type SocialPlatform =
@@ -39,71 +59,84 @@ export type ExtractedLink = {
 };
 
 export type ConfidenceLevel = "low" | "medium" | "high";
+export type EvidenceSourceType =
+  | "homepage"
+  | "linked_page"
+  | "osm"
+  | "gdelt";
 
 export type EvidenceItem = {
   claim: string;
   sourceUrl?: string;
-  sourceType: "homepage" | "linked_page" | "osm" | "gdelt" | "mock";
+  sourceType: EvidenceSourceType;
+  sourceIds: SourceId[];
   confidence: ConfidenceLevel;
+};
+
+export type NullableScoreBreakdown = {
+  seo: number | null;
+  conversion: number | null;
+  trust: number | null;
+  content: number | null;
+  technical: number | null;
 };
 
 export type WebsiteAudit = {
   url?: string;
   normalizedUrl?: string;
+  auditStatus: AuditStatus;
   skipped: boolean;
   reason?: string;
+  sourceIds: SourceId[];
 
   title?: string;
   metaDescription?: string;
-  h1Count: number;
-  headingCount: number;
-  wordCount: number;
+  h1Count: number | null;
+  headingCount: number | null;
+  wordCount: number | null;
 
-  ctaCount: number;
-  hasPhone: boolean;
-  hasEmail: boolean;
-  hasContactPage: boolean;
-  hasBookingOrQuote: boolean;
-  hasPricingPage: boolean;
-  hasServicesPage: boolean;
-  hasAboutOrTeamPage: boolean;
-  hasBlogOrNewsPage: boolean;
-  hasCareersPage: boolean;
-  hasTestimonials: boolean;
-  hasTrustLanguage: boolean;
-  hasGalleryOrCaseStudy: boolean;
-  hasSocialLinks: boolean;
+  ctaCount: number | null;
+  hasPhone: boolean | null;
+  hasEmail: boolean | null;
+  hasContactPage: boolean | null;
+  hasBookingOrQuote: boolean | null;
+  hasPricingPage: boolean | null;
+  hasServicesPage: boolean | null;
+  hasAboutOrTeamPage: boolean | null;
+  hasBlogOrNewsPage: boolean | null;
+  hasCareersPage: boolean | null;
+  hasTestimonials: boolean | null;
+  hasTrustLanguage: boolean | null;
+  hasGalleryOrCaseStudy: boolean | null;
+  hasSocialLinks: boolean | null;
 
-  hasViewport: boolean;
-  isHttps: boolean;
-  htmlBytes: number;
-  fetchMs: number;
+  hasViewport: boolean | null;
+  isHttps: boolean | null;
+  htmlBytes: number | null;
+  fetchMs: number | null;
 
   extractedLinks: ExtractedLink[];
   socialLinks: SocialLinks;
 
-  websiteScore: number;
-
-  scoreBreakdown: {
-    seo: number;
-    conversion: number;
-    trust: number;
-    content: number;
-    technical: number;
-  };
-
+  websiteScore: number | null;
+  scoreBreakdown: NullableScoreBreakdown;
   evidence: EvidenceItem[];
 };
 
 export type MarketSignal = {
   label: string;
   evidence: string;
-  sourceUrl?: string;
-  sourceType: "homepage" | "linked_page" | "social_link" | "news" | "mock";
+  sourceUrl: string;
+  sourceType: "homepage" | "linked_page" | "social_link" | "news";
+  sourceIds: SourceId[];
+  observedAt?: string;
   confidence: ConfidenceLevel;
 };
 
 export type SignalScan = {
+  auditStatus: AuditStatus;
+  newsStatus: "complete" | "unavailable" | "not_requested";
+  sourceIds: SourceId[];
   socialLinks: SocialLinks;
   momentumSignals: MarketSignal[];
   riskSignals: MarketSignal[];
@@ -111,9 +144,9 @@ export type SignalScan = {
   offerSignals: MarketSignal[];
   hiringSignals: MarketSignal[];
   newsSignals: MarketSignal[];
-  momentumScore: number;
-  riskScore: number;
-  changeScore: number;
+  momentumScore: number | null;
+  riskScore: number | null;
+  changeScore: number | null;
 };
 
 export type CompetitorReport = {
@@ -124,30 +157,33 @@ export type CompetitorReport = {
   address?: string;
   lat?: number;
   lon?: number;
-  source: "user" | "overpass" | "mock";
+  source: "user" | "overpass";
+  sourceIds: SourceId[];
   sourceNote?: string;
+  auditStatus: AuditStatus;
 
-  categoryMatchScore: number;
-  localPresenceScore: number;
-
+  categoryMatchScore: number | null;
+  localPresenceScore: number | null;
   websiteAudit: WebsiteAudit;
   signals: SignalScan;
 
-  finalScore: number;
-  rank?: number;
+  finalScore: number | null;
+  rank: number | null;
 };
 
 export type MarketSummary = {
   competitorCount: number;
-  competitorAverageWebsiteScore: number;
-  competitorAverageFinalScore: number;
-  yourRank: number;
-  marketGap: number;
+  auditedCompetitorCount: number;
+  competitorAverageWebsiteScore: number | null;
+  competitorAverageFinalScore: number | null;
+  yourRank: number | null;
+  marketGap: number | null;
   status:
     | "leading"
     | "competitive"
     | "behind but recoverable"
-    | "low visibility";
+    | "low visibility"
+    | null;
   strongestCompetitor?: string;
   biggestOpportunity?: string;
 };
@@ -157,6 +193,7 @@ export type ReportFinding = {
   finding: string;
   evidence: string;
   implication: string;
+  sourceIds: SourceId[];
   confidence: ConfidenceLevel;
 };
 
@@ -165,6 +202,7 @@ export type CompetitorHighlight = {
   conciseSummary: string;
   strongestVisibleSignal?: string;
   possibleRiskSignal?: string;
+  sourceIds: SourceId[];
   confidence: ConfidenceLevel;
 };
 
@@ -172,6 +210,8 @@ export type Recommendation = {
   title: string;
   why: string;
   action: string;
+  evidence: string;
+  sourceIds: SourceId[];
   priority: "high" | "medium" | "low";
 };
 
@@ -188,39 +228,36 @@ export type BenchmarkReport = {
 };
 
 export type DataQuality = {
-  discoverySource: "overpass" | "mock" | "mixed";
-  usedMockData: boolean;
-  liveCompetitorsFound: number;
-  failedHomepageFetches: number;
+  coverageStatus: AuditStatus;
+  realCompetitorsFound: number;
+  scoredCompetitors: number;
+  failedAudits: number;
   limitedAudits: number;
+  unavailableFields: string[];
   cacheHit: boolean;
   notes: string[];
 };
 
 export type AnalyzeMarketResponse = {
+  schemaVersion: 2;
+  provenance: Provenance;
   input: AnalyzeMarketRequest;
 
   market: {
     label: string;
-    lat?: number;
-    lon?: number;
+    lat: number;
+    lon: number;
     bbox?: [number, number, number, number];
-    source: "nominatim" | "mock";
+    source: "nominatim";
+    sourceIds: SourceId[];
   };
 
   user: CompetitorReport;
   competitors: CompetitorReport[];
-
   summary: MarketSummary;
   report: BenchmarkReport;
   recommendations: Recommendation[];
-
   dataQuality: DataQuality;
-
   generatedAt: string;
-
-  // Set by the API route after the report is persisted to the durable store.
-  // Enables the shareable read-only view at /r/[reportId]. Absent when the
-  // store is unavailable, so callers must treat it as optional.
   reportId?: string;
 };
