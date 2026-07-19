@@ -10,6 +10,22 @@ if (!baseUrl) throw new Error("BENCHMARK_SCOUT_BASE_URL is required.");
 
 const catalog = JSON.parse(await readFile(new URL("../data/real-samples/catalog.json", import.meta.url), "utf8"));
 if (!Array.isArray(catalog) || catalog.length !== 25) throw new Error("Expected exactly 25 Alameda catalog entries.");
+const requestedCatalogIds = (process.env.GATE_CATALOG_IDS ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const selectedCatalog = requestedCatalogIds.length
+  ? catalog.filter((entry) => requestedCatalogIds.includes(entry.id))
+  : catalog;
+if (requestedCatalogIds.length && selectedCatalog.length !== new Set(requestedCatalogIds).size) {
+  throw new Error("GATE_CATALOG_IDS contains an unknown or duplicate catalog ID.");
+}
+const initialDelayMs = Number(process.env.GATE_INITIAL_DELAY_MS ?? 0);
+if (!Number.isFinite(initialDelayMs) || initialDelayMs < 0) {
+  throw new Error("GATE_INITIAL_DELAY_MS must be a non-negative number.");
+}
+const deploymentId = process.env.BENCHMARK_SCOUT_DEPLOYMENT_ID ?? null;
+const commitSha = process.env.BENCHMARK_SCOUT_COMMIT_SHA ?? null;
 
 const outputDirectory = path.join(process.cwd(), "artifacts", "launch-gate");
 await mkdir(outputDirectory, { recursive: true });
@@ -17,7 +33,7 @@ const startedAt = new Date().toISOString();
 const outputPath = path.join(outputDirectory, `${startedAt.replaceAll(":", "-")}.json`);
 const results = [];
 let lastAnalyzeAt = 0;
-let analyzeNotBeforeAt = 0;
+let analyzeNotBeforeAt = Date.now() + initialDelayMs;
 
 function requestSignal(timeoutMs) {
   return AbortSignal.timeout(timeoutMs);
@@ -33,7 +49,11 @@ function headers() {
 }
 
 async function saveProgress() {
-  await writeFile(outputPath, `${JSON.stringify({ baseUrl, startedAt, results }, null, 2)}\n`, "utf8");
+  await writeFile(
+    outputPath,
+    `${JSON.stringify({ baseUrl, deploymentId, commitSha, startedAt, selectedCatalogIds: selectedCatalog.map((entry) => entry.id), results }, null, 2)}\n`,
+    "utf8"
+  );
 }
 
 async function spaceAnalyzeCalls() {
@@ -115,7 +135,7 @@ async function analyze(entry) {
   throw lastError;
 }
 
-for (const entry of catalog) {
+for (const entry of selectedCatalog) {
   const row = { catalogId: entry.id, industry: entry.industry, startedAt: new Date().toISOString(), status: "running" };
   results.push(row);
   await saveProgress();

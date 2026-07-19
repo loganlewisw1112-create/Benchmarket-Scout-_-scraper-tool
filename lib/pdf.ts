@@ -10,6 +10,12 @@ const PAGE_WIDTH = 210;
 const MARGIN = 14;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 
+export const PDF_TABLE_PAGINATION = {
+  pageBreak: "auto",
+  rowPageBreak: "avoid",
+  showHead: "everyPage",
+} as const;
+
 export function formatPdfMetric(
   value: number | null,
   options?: { signed?: boolean; suffix?: string }
@@ -147,8 +153,9 @@ export function downloadBenchmarkPdf(reportData: AnalyzeMarketResponse): void {
   y = addSectionTitle(doc, "Local Position", y);
 
   autoTable(doc, {
+    ...PDF_TABLE_PAGINATION,
     startY: y,
-    margin: { left: MARGIN, right: MARGIN },
+    margin: { left: MARGIN, right: MARGIN, top: 20, bottom: 20 },
     head: [["Metric", "Value"]],
     body: [
       ["Your score", formatPdfMetric(user.finalScore, { suffix: "/100" })],
@@ -199,8 +206,9 @@ export function downloadBenchmarkPdf(reportData: AnalyzeMarketResponse): void {
   y = addSectionTitle(doc, "Recommended Next Actions", y);
 
   autoTable(doc, {
+    ...PDF_TABLE_PAGINATION,
     startY: y,
-    margin: { left: MARGIN, right: MARGIN },
+    margin: { left: MARGIN, right: MARGIN, top: 20, bottom: 20 },
     head: [["Priority", "Recommendation", "Action"]],
     body: report.actionPlan
       .slice(0, 5)
@@ -252,8 +260,9 @@ export function downloadBenchmarkPdf(reportData: AnalyzeMarketResponse): void {
     });
 
   autoTable(doc, {
+    ...PDF_TABLE_PAGINATION,
     startY: y,
-    margin: { left: MARGIN, right: MARGIN },
+    margin: { left: MARGIN, right: MARGIN, top: 20, bottom: 20 },
     head: [
       ["Rank", "Business", "Source", "Website", "Momentum", "Risk", "Final", "Key Signal"],
     ],
@@ -297,8 +306,9 @@ export function downloadBenchmarkPdf(reportData: AnalyzeMarketResponse): void {
   y = ensureSpace(doc, y + 4, 50);
   y = addSectionTitle(doc, "Sources Appendix", y);
   autoTable(doc, {
+    ...PDF_TABLE_PAGINATION,
     startY: y,
-    margin: { left: MARGIN, right: MARGIN },
+    margin: { left: MARGIN, right: MARGIN, top: 20, bottom: 20 },
     head: [["ID", "Provider", "Entity", "URL", "Access time", "Status"]],
     body: buildSourcesAppendixRows(reportData.provenance.sources),
     theme: "grid",

@@ -4,6 +4,7 @@ import {
   buildSourcesAppendixRows,
   formatPdfMetric,
   formatPdfSourceMarkers,
+  PDF_TABLE_PAGINATION,
   sanitizeFilenamePart,
 } from "./pdf";
 
@@ -54,6 +55,14 @@ describe("buildFilename", () => {
 });
 
 describe("real-only report formatting", () => {
+  it("keeps table rows intact and repeats headers across PDF pages", () => {
+    expect(PDF_TABLE_PAGINATION).toEqual({
+      pageBreak: "auto",
+      rowPageBreak: "avoid",
+      showHead: "everyPage",
+    });
+  });
+
   it("renders nullable and signed metrics without leaking null", () => {
     expect(formatPdfMetric(null, { suffix: "/100" })).toBe("N/A");
     expect(formatPdfMetric(0, { signed: true })).toBe("+0");
