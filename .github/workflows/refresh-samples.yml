@@ -4,6 +4,16 @@ on:
   schedule:
     - cron: "17 9 * * *"
   workflow_dispatch:
+    inputs:
+      catalog_ids:
+        description: "Optional comma-separated catalog IDs to refresh"
+        required: false
+        type: string
+      required_successes:
+        description: "Successful refreshes required for this manual run"
+        required: false
+        default: "12"
+        type: string
 
 permissions:
   contents: read
@@ -19,12 +29,14 @@ jobs:
     env:
       SAMPLE_REFRESH_URL: https://benchmarket-scout-scraper-tool.vercel.app/api/sample-report/refresh
       SAMPLE_REFRESH_SECRET: ${{ secrets.SAMPLE_REFRESH_SECRET }}
+      REQUESTED_CATALOG_IDS: ${{ inputs.catalog_ids || '' }}
+      REQUIRED_SUCCESSES: ${{ inputs.required_successes || '12' }}
     steps:
       - name: Refresh twelve catalog entries sequentially
         shell: bash
         run: |
           set -euo pipefail
-          catalog=(
+          all_catalog=(
             hvac-absolute-air-solutions bakery-firebrand-bread dentistry-richard-tabor
             plumbing-berkeley-plumbing landscaping-rendered-stone law-andrew-dosa
             yoga-namaste auto-detailing-jg-mobile pet-grooming-alameda-mobile
@@ -35,6 +47,46 @@ jobs:
             cleaning-z-and-j gym-alameda-fitness daycare-little-blue-dolphins
             photography-clayton-mitchell
           )
+          catalog=("${all_catalog[@]}")
+
+          if [[ -n "${REQUESTED_CATALOG_IDS//[[:space:]]/}" ]]; then
+            IFS=',' read -ra requested_catalog <<< "$REQUESTED_CATALOG_IDS"
+            catalog=()
+            for raw_catalog_id in "${requested_catalog[@]}"; do
+              catalog_id="${raw_catalog_id#"${raw_catalog_id%%[![:space:]]*}"}"
+              catalog_id="${catalog_id%"${catalog_id##*[![:space:]]}"}"
+              if [[ -z "$catalog_id" ]]; then
+                echo "catalog_ids contains an empty catalog ID."
+                exit 1
+              fi
+
+              valid=false
+              for known_catalog_id in "${all_catalog[@]}"; do
+                if [[ "$catalog_id" == "$known_catalog_id" ]]; then
+                  valid=true
+                  break
+                fi
+              done
+              if [[ "$valid" != true ]]; then
+                echo "Unknown catalog ID: $catalog_id"
+                exit 1
+              fi
+              for selected_catalog_id in "${catalog[@]}"; do
+                if [[ "$catalog_id" == "$selected_catalog_id" ]]; then
+                  echo "Duplicate catalog ID: $catalog_id"
+                  exit 1
+                fi
+              done
+              catalog+=("$catalog_id")
+            done
+          fi
+
+          if ! [[ "$REQUIRED_SUCCESSES" =~ ^[1-9][0-9]*$ ]] ||
+             (( REQUIRED_SUCCESSES > ${#catalog[@]} )); then
+            echo "required_successes must be between 1 and ${#catalog[@]}."
+            exit 1
+          fi
+
           successes=0
           attempts=0
           for catalog_id in "${catalog[@]}"; do
@@ -49,7 +101,7 @@ jobs:
               --data "{\"catalogId\":\"$catalog_id\"}"); then
               if [[ "$http_code" =~ ^2 ]]; then
                 successes=$((successes + 1))
-                echo "Refreshed $catalog_id ($successes/12)."
+                echo "Refreshed $catalog_id ($successes/$REQUIRED_SUCCESSES)."
               else
                 echo "Refresh failed for $catalog_id with HTTP $http_code."
                 sed -e 's/[[:cntrl:]]/ /g' "$response_body"
@@ -59,11 +111,11 @@ jobs:
             fi
             rm -f "$response_body"
 
-            if [ "$successes" -eq 12 ]; then break; fi
+            if [ "$successes" -eq "$REQUIRED_SUCCESSES" ]; then break; fi
             sleep 65
           done
 
-          if [ "$successes" -lt 12 ]; then
-            echo "Only $successes of 12 required samples refreshed after $attempts attempts."
+          if [ "$successes" -lt "$REQUIRED_SUCCESSES" ]; then
+            echo "Only $successes of $REQUIRED_SUCCESSES required samples refreshed after $attempts attempts."
             exit 1
           fi
