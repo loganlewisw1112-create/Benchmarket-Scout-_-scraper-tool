@@ -34,6 +34,7 @@ vi.mock("./audit", () => ({
 
 import {
   ANALYSIS_TIMING_BUDGETS,
+  MAX_AUDITED_COMPETITORS,
   analyzeMarket,
   analysisCacheKey,
 } from "./analyze-market";
@@ -404,15 +405,21 @@ describe("analyzeMarket real-data-only orchestration", () => {
     );
   });
 
-  it("keeps the explicit worst-case network schedule below the 42s analysis ceiling", () => {
-    const auditWaves = Math.ceil(11 / ANALYSIS_TIMING_BUDGETS.auditConcurrency);
+  it("keeps the explicit worst-case network schedule below the 50s analysis ceiling", () => {
+    const auditEntities = 1 + MAX_AUDITED_COMPETITORS;
+    const auditWaves = Math.ceil(
+      auditEntities / ANALYSIS_TIMING_BUDGETS.auditConcurrency
+    );
     const scheduledNetworkMs =
       ANALYSIS_TIMING_BUDGETS.geocodeMs +
       ANALYSIS_TIMING_BUDGETS.overpassMs +
       auditWaves * ANALYSIS_TIMING_BUDGETS.auditPerEntityMs +
       ANALYSIS_TIMING_BUDGETS.newsPerEntityMs;
 
-    expect(scheduledNetworkMs).toBe(35_500);
+    expect(scheduledNetworkMs).toBe(40_500);
+    expect(
+      ANALYSIS_TIMING_BUDGETS.overallMs - scheduledNetworkMs
+    ).toBeGreaterThanOrEqual(9_000);
     expect(scheduledNetworkMs).toBeLessThan(
       ANALYSIS_TIMING_BUDGETS.overallMs
     );

@@ -37,15 +37,16 @@ import type {
 import type { ValidatedAnalyzeMarketRequest } from "./validation";
 
 export const ANALYSIS_TIMING_BUDGETS = {
-  overallMs: 42_000,
+  overallMs: 50_000,
   geocodeMs: 5_000,
-  overpassMs: 6_000,
+  overpassMs: 18_000,
   auditPerEntityMs: 7_000,
   auditConcurrency: 4,
   newsPerEntityMs: 3_500,
 } as const;
 
 const MAX_COMPETITORS = 10;
+export const MAX_AUDITED_COMPETITORS = 7;
 const GDELT_TOP_N = 3;
 const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
 
@@ -538,8 +539,14 @@ export async function analyzeMarket(
       })
     );
   }
+  const auditedCandidateIds = new Set(
+    candidates
+      .filter((candidate) => candidate.website)
+      .slice(0, MAX_AUDITED_COMPETITORS)
+      .map((candidate) => candidate.id)
+  );
   for (const candidate of candidates) {
-    if (!candidate.website) continue;
+    if (!candidate.website || !auditedCandidateIds.has(candidate.id)) continue;
     candidateHomepageIds.set(
       candidate.id,
       provenance.add({
@@ -578,7 +585,12 @@ export async function analyzeMarket(
             })
           )
         : Promise.resolve(
-            skippedAudit(undefined, "no public website listed")
+            skippedAudit(
+              candidate.website,
+              candidate.website
+                ? "website audit not selected within bounded report capacity"
+                : "no public website listed"
+            )
           )
     ),
   ]);

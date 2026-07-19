@@ -17,6 +17,7 @@ const startedAt = new Date().toISOString();
 const outputPath = path.join(outputDirectory, `${startedAt.replaceAll(":", "-")}.json`);
 const results = [];
 let lastAnalyzeAt = 0;
+let analyzeNotBeforeAt = 0;
 
 function requestSignal(timeoutMs) {
   return AbortSignal.timeout(timeoutMs);
@@ -36,9 +37,20 @@ async function saveProgress() {
 }
 
 async function spaceAnalyzeCalls() {
-  const remaining = MIN_INTERVAL_MS - (Date.now() - lastAnalyzeAt);
+  const nextAllowedAt = Math.max(lastAnalyzeAt + MIN_INTERVAL_MS, analyzeNotBeforeAt);
+  const remaining = nextAllowedAt - Date.now();
   if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
   lastAnalyzeAt = Date.now();
+}
+
+function recordRetryAfter(response) {
+  const value = response.headers.get("retry-after");
+  if (!value) return;
+  const seconds = Number(value);
+  const retryAt = Number.isFinite(seconds)
+    ? Date.now() + Math.max(0, seconds) * 1000
+    : Date.parse(value);
+  if (Number.isFinite(retryAt)) analyzeNotBeforeAt = Math.max(analyzeNotBeforeAt, retryAt);
 }
 
 function errorCode(body) {
@@ -92,6 +104,7 @@ async function analyze(entry) {
       const code = errorCode(body);
       lastError = new Error(`${response.status} ${code ?? "UNKNOWN"}: ${body?.error?.message ?? body?.error ?? "analysis failed"}`);
       const retryable = response.status === 429 || (response.status === 503 && code === "SOURCE_UNAVAILABLE");
+      if (retryable) recordRetryAfter(response);
       if (!retryable || attempt === MAX_ATTEMPTS) throw lastError;
     } catch (error) {
       if (error === lastError) throw error;
@@ -110,20 +123,30 @@ for (const entry of catalog) {
     const { body, attempt } = await analyze(entry);
     const reportStats = validateRealReport(body);
     if (typeof body.reportId !== "string" || !body.reportId) throw new Error("analysis did not persist a reportId");
+    if (body.dataQuality?.cacheHit === true) throw new Error("analysis used a cached report instead of the live pipeline");
+
+    Object.assign(row, {
+      phase: "analyzed",
+      attempts: attempt,
+      reportId: body.reportId,
+      sourceCount: reportStats.sourceCount,
+      scoredEntityCount: reportStats.scoredEntityCount,
+      cacheHit: body.dataQuality?.cacheHit === true,
+    });
+    await saveProgress();
 
     const storedResponse = await fetchVerification(`/api/reports/${encodeURIComponent(body.reportId)}`);
     const stored = await storedResponse.json();
     validateRealReport(stored.report ?? stored);
+    row.phase = "stored-verified";
+    await saveProgress();
 
     const sharedResponse = await fetchVerification(`/r/${encodeURIComponent(body.reportId)}`);
     validateSharedReportHtml(await sharedResponse.text(), body);
 
     Object.assign(row, {
       status: "passed",
-      attempts: attempt,
-      reportId: body.reportId,
-      sourceCount: reportStats.sourceCount,
-      scoredEntityCount: reportStats.scoredEntityCount,
+      phase: "shared-verified",
       completedAt: new Date().toISOString(),
     });
   } catch (error) {

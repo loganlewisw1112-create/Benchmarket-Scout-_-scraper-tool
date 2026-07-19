@@ -15,7 +15,9 @@ import {
   getReport,
   isDurableStoreConfigured,
   isValidReportId,
+  KV_REQUEST_TIMEOUT_MS,
   kvCappedRateLimit,
+  kvRateLimit,
   newReportId,
   readReportV2,
   readSampleSnapshotsV2,
@@ -400,5 +402,38 @@ describe("atomic KV admission", () => {
     await expect(
       admitWaitlistEmail("failure@example.com", {}, T0)
     ).rejects.toThrow("KV down");
+  });
+});
+
+describe("REST KV request timeout", () => {
+  it("applies a 1.5-second abort signal to every hosted KV fetch", async () => {
+    process.env.KV_REST_API_URL = "https://kv.test";
+    process.env.KV_REST_API_TOKEN = "token";
+    const controller = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(controller.signal);
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => {
+        void _input;
+        void _init;
+        return new Response(JSON.stringify({ result: 1 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await kvRateLimit("timeout-test", WINDOW_MS, 10);
+
+    expect(KV_REQUEST_TIMEOUT_MS).toBe(1_500);
+    expect(timeout).toHaveBeenCalledTimes(2);
+    expect(timeout).toHaveBeenNthCalledWith(1, KV_REQUEST_TIMEOUT_MS);
+    expect(timeout).toHaveBeenNthCalledWith(2, KV_REQUEST_TIMEOUT_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init?.signal).toBe(controller.signal);
+    }
   });
 });

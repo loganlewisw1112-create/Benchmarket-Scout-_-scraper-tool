@@ -39,7 +39,6 @@ describe("queryOverpass", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response("", false, 504))
-      .mockResolvedValueOnce(response("", false, 504))
       .mockResolvedValue(response(JSON.stringify({ elements })));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -47,11 +46,11 @@ describe("queryOverpass", () => {
 
     expect(result.elements).toEqual(elements);
     expect(result.endpoint).toBe(
-      "https://overpass.kumi.systems/api/interpreter"
+      "https://overpass.private.coffee/api/interpreter"
     );
     expect(Number.isNaN(Date.parse(result.accessedAt))).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[2][0]).toBe("https://overpass.kumi.systems/api/interpreter");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("https://overpass.private.coffee/api/interpreter");
   }, 5000);
 
   it("throws after exhausting all endpoints and attempts", async () => {
@@ -63,7 +62,7 @@ describe("queryOverpass", () => {
       status: 503,
       source: "overpass",
     } satisfies Partial<SourceUnavailableError>);
-    expect(fetchMock).toHaveBeenCalledTimes(4); // 2 endpoints x 2 attempts
+    expect(fetchMock).toHaveBeenCalledTimes(2); // 2 endpoints x 1 attempt
   }, 8000);
 
   it("treats a non-JSON response as a failure and retries", async () => {
@@ -131,7 +130,7 @@ describe("queryOverpass", () => {
       status: 503,
       source: "overpass",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   }, 8000);
 
   it("honors an already-canceled parent budget with typed SOURCE_UNAVAILABLE", async () => {

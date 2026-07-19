@@ -129,11 +129,14 @@ export function validateRealReport(report) {
 }
 
 export function validateSharedReportHtml(html, report) {
+  // React may split server-rendered text with hydration comments, for example
+  // `[<!-- -->S1<!-- -->]`. Remove comments before checking visible markers.
+  const visibleHtml = html.replace(/<!--[\s\S]*?-->/g, "");
   invariant(/Sources Appendix/i.test(html), "shared report is missing Sources Appendix");
   invariant(/noindex/i.test(html) && /nofollow/i.test(html), "shared report is missing noindex,nofollow metadata");
   invariant(/property=["']og:title["']/i.test(html), "shared report is missing Open Graph title metadata");
   invariant(/property=["']og:description["']/i.test(html), "shared report is missing Open Graph description metadata");
-  invariant(/\[S1\]/.test(html), "shared report is missing visible source markers");
+  invariant(/\[S1\]/.test(visibleHtml), "shared report is missing visible source markers");
   const entities = report
     ? [report.user, ...(Array.isArray(report.competitors) ? report.competitors : [])]
     : [];

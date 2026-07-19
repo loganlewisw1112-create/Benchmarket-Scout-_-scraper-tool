@@ -1,6 +1,5 @@
 import { SourceUnavailableError } from "./pipeline-errors";
 import {
-  abortableDelay,
   createTimedSignal,
   remainingBudgetMs,
   type RequestBudgetOptions,
@@ -894,18 +893,17 @@ const USER_AGENT =
   process.env.APP_USER_AGENT ??
   "BenchmarkScout/0.1 (contact: github.com/loganlewisw1112-create/Benchmarket-Scout-_-scraper-tool)";
 
-// The public Overpass API is known to be intermittently flaky (occasional
-// 504s under load even when the service is generally up). We retry the
-// primary endpoint a couple of times before spreading attempts across
-// alternate public mirrors, rather than giving up on the first failure.
+// Use two independently operated public global instances from the current
+// OpenStreetMap community instance list. One meaningful attempt per instance
+// is more useful than several very short retries: live Alameda queries can
+// legitimately need several seconds under provider load.
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
 ];
 
-const ATTEMPTS_PER_ENDPOINT = 2;
-const PER_REQUEST_TIMEOUT_MS = 1_350;
-const RETRY_BACKOFF_MS = 200;
+const ATTEMPTS_PER_ENDPOINT = 1;
+const PER_REQUEST_TIMEOUT_MS = 8_500;
 
 // Staged resolution (esp. the direct-tag probe) can produce many candidate tag
 // clauses. Cap them so a single Overpass request stays polite and fast; the
@@ -1003,7 +1001,7 @@ export async function queryOverpassDetailed(
     )
     .join("\n  ");
 
-  const query = `[out:json][timeout:25];
+  const query = `[out:json][timeout:${Math.floor(PER_REQUEST_TIMEOUT_MS / 1000)}];
 (
   ${clauses}
 );
@@ -1031,16 +1029,6 @@ out center tags ${OUTPUT_LIMIT};`;
         };
       } catch (err) {
         lastError = err;
-        const isLastAttemptOnEndpoint = attempt === ATTEMPTS_PER_ENDPOINT;
-        if (!isLastAttemptOnEndpoint && !options.signal?.aborted) {
-          await abortableDelay(
-            Math.min(
-              RETRY_BACKOFF_MS * attempt,
-              remainingBudgetMs(deadlineAt)
-            ),
-            options.signal
-          );
-        }
       }
     }
   }

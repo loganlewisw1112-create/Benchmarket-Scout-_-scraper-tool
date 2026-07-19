@@ -24,6 +24,7 @@ import type { AnalyzeMarketResponse } from "./types";
 
 const REPORT_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
 const ID_PATTERN = /^[A-Za-z0-9_-]{6,64}$/;
+export const KV_REQUEST_TIMEOUT_MS = 1_500;
 
 export type StoredReport = {
   schemaVersion: 2;
@@ -165,6 +166,7 @@ async function kvCommand(
     },
     body: JSON.stringify(command),
     cache: "no-store",
+    signal: AbortSignal.timeout(KV_REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`KV command failed with HTTP ${res.status}`);

@@ -59,4 +59,10 @@ describe("real report launch validator", () => {
     ))
       .not.toThrow();
   });
+
+  it("recognizes a citation marker split by React hydration comments", () => {
+    expect(() => validateSharedReportHtml(
+      "<meta name='robots' content='noindex,nofollow'><meta property='og:title' content='Report'><meta property='og:description' content='Observed report'><h2>Sources Appendix</h2><span>[<!-- -->S1<!-- -->]</span>"
+    )).not.toThrow();
+  });
 });
