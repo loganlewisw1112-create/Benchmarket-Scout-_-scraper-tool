@@ -4,7 +4,14 @@
 import "@testing-library/jest-dom/vitest";
 
 import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, beforeEach } from "vitest";
+
+beforeEach(() => {
+  delete process.env.KV_REST_API_URL;
+  delete process.env.KV_REST_API_TOKEN;
+  delete process.env.UPSTASH_REDIS_REST_URL;
+  delete process.env.UPSTASH_REDIS_REST_TOKEN;
+});
 
 // RTL's automatic cleanup needs a global afterEach, which vitest only
 // provides with globals: true — register it explicitly instead so each

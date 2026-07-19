@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { enforceGuard } from "./api-guard";
-import { MAX_REQUESTS_PER_WINDOW } from "./rate-limit";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  enforceGlobalAnalyzeLimit,
+  enforceGuard,
+  GLOBAL_ANALYSES_PER_WINDOW,
+} from "./api-guard";
+import { MAX_REQUESTS_PER_WINDOW, WINDOW_MS } from "./rate-limit";
 
 function makeRequest(ip: string, opts: { key?: string; queryKey?: string } = {}) {
   const headers = new Headers({ "x-forwarded-for": ip });
@@ -23,6 +27,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   if (prevKey === undefined) delete process.env.SCOUT_API_KEY;
   else process.env.SCOUT_API_KEY = prevKey;
   if (prevHash === undefined) delete process.env.SCOUT_API_KEY_HASH;
@@ -81,5 +86,44 @@ describe("enforceGuard rate limiting (in-memory fallback)", () => {
     const blocked = await enforceGuard(makeRequest(ip));
     expect(blocked.ok).toBe(false);
     if (!blocked.ok) expect(blocked.status).toBe(429);
+  });
+});
+
+describe("global fixed-window limit", () => {
+  const T0 = 1_750_000_020_000;
+
+  it("caps analyses in memory and resets at the next window", async () => {
+    for (let i = 0; i < GLOBAL_ANALYSES_PER_WINDOW; i++) {
+      expect((await enforceGlobalAnalyzeLimit(T0)).ok).toBe(true);
+    }
+    const blocked = await enforceGlobalAnalyzeLimit(T0);
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) {
+      expect(blocked.status).toBe(429);
+      expect(blocked.error).toContain("30 analyses");
+    }
+    expect((await enforceGlobalAnalyzeLimit(T0 + WINDOW_MS)).ok).toBe(true);
+  });
+
+  it("fails closed when configured KV is unavailable", async () => {
+    process.env.KV_REST_API_URL = "https://kv.test";
+    process.env.KV_REST_API_TOKEN = "token";
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("KV down")));
+
+    const result = await enforceGlobalAnalyzeLimit(T0 + WINDOW_MS * 2);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(503);
+      expect(result.retryAfterMs).toBe(WINDOW_MS);
+      expect(result.error).toContain("temporarily unavailable");
+    }
+  });
+
+  it("keeps the per-IP guard's memory fallback when configured KV fails", async () => {
+    process.env.KV_REST_API_URL = "https://kv.test";
+    process.env.KV_REST_API_TOKEN = "token";
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("KV down")));
+
+    expect((await enforceGuard(makeRequest("198.51.100.200"))).ok).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_REQUESTS_PER_WINDOW,
   WINDOW_MS,
+  checkFixedWindowRateLimit,
   checkRateLimit,
 } from "./rate-limit";
 
@@ -44,5 +45,20 @@ describe("checkRateLimit", () => {
     }
     expect(checkRateLimit("test-noisy", T0 + 1).allowed).toBe(false);
     expect(checkRateLimit("test-quiet", T0 + 1).allowed).toBe(true);
+  });
+});
+
+describe("checkFixedWindowRateLimit", () => {
+  it("does not increase the counter for denied global attempts", () => {
+    const key = "global-no-overcount";
+    for (let i = 0; i < 2; i++) {
+      expect(checkFixedWindowRateLimit(key, WINDOW_MS, 2, T0).allowed).toBe(
+        true
+      );
+    }
+    expect(checkFixedWindowRateLimit(key, WINDOW_MS, 2, T0).allowed).toBe(
+      false
+    );
+    expect(checkFixedWindowRateLimit(key, WINDOW_MS, 3, T0).allowed).toBe(true);
   });
 });
