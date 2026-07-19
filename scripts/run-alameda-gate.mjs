@@ -25,6 +25,9 @@ function requestSignal(timeoutMs) {
 function headers() {
   const value = { "content-type": "application/json", accept: "application/json" };
   if (process.env.SCOUT_API_KEY) value["x-scout-key"] = process.env.SCOUT_API_KEY;
+  if (process.env.VERCEL_AUTOMATION_BYPASS_SECRET) {
+    value["x-vercel-protection-bypass"] = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  }
   return value;
 }
 

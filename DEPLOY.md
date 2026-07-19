@@ -51,6 +51,12 @@ least 65 seconds apart. Each successful run must persist and render through a
 working share URL. Bounded retries are allowed only for typed retryable source
 outages.
 
+If Vercel Deployment Protection is enabled, create a temporary project
+automation bypass and provide it only to the gate process as
+`VERCEL_AUTOMATION_BYPASS_SECRET`. The gate sends it as the documented
+`x-vercel-protection-bypass` header on analysis, stored-report, and shared-page
+requests. Revoke the temporary bypass after preview validation.
+
 Validate every produced report:
 
 - `schemaVersion` is `2` and provenance policy is `real-only`.
