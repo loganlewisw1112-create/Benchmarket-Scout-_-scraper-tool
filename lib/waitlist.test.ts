@@ -10,16 +10,18 @@ describe("validateWaitlistRequest", () => {
     }
   });
 
-  it("preserves optional source and reportId", () => {
+  it("preserves optional source, reportId, and feedback message", () => {
     const parsed = validateWaitlistRequest({
       email: "a@b.com",
       source: "report",
       reportId: "abc123",
+      message: "  The comparison was useful.  ",
     });
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data.source).toBe("report");
       expect(parsed.data.reportId).toBe("abc123");
+      expect(parsed.data.message).toBe("The comparison was useful.");
     }
   });
 
@@ -36,5 +38,14 @@ describe("validateWaitlistRequest", () => {
   it("rejects an over-long email", () => {
     const huge = "x".repeat(250) + "@example.com";
     expect(validateWaitlistRequest({ email: huge }).success).toBe(false);
+  });
+
+  it("rejects feedback over 1,000 characters", () => {
+    expect(
+      validateWaitlistRequest({
+        email: "feedback@example.com",
+        message: "x".repeat(1_001),
+      }).success
+    ).toBe(false);
   });
 });

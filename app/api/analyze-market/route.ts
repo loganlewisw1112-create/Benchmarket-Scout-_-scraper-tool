@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { analyzeMarket } from "@/lib/analyze-market";
-import { enforceGuard } from "@/lib/api-guard";
+import { enforceGlobalAnalyzeLimit, enforceGuard } from "@/lib/api-guard";
 import { logger, serializeError, withRequestId } from "@/lib/logger";
 import { saveReport } from "@/lib/store";
 import { validateAnalyzeMarketRequest } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
@@ -53,6 +54,23 @@ export async function POST(request: Request) {
           details: parsed.error.flatten().fieldErrors,
         },
         { status: 400, headers: { "x-request-id": requestId } }
+      );
+    }
+
+    const globalLimit = await enforceGlobalAnalyzeLimit();
+    if (!globalLimit.ok) {
+      logger.warn("analyze-market rejected by global limit", {
+        retryAfterMs: globalLimit.retryAfterMs,
+      });
+      return NextResponse.json(
+        { error: globalLimit.error },
+        {
+          status: globalLimit.status,
+          headers: {
+            "x-request-id": requestId,
+            "Retry-After": String(Math.ceil(globalLimit.retryAfterMs / 1000)),
+          },
+        }
       );
     }
 

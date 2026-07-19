@@ -13,15 +13,31 @@
 
 import crypto from "node:crypto";
 import {
+  checkFixedWindowRateLimit,
   checkRateLimit,
   MAX_REQUESTS_PER_WINDOW,
   WINDOW_MS,
 } from "./rate-limit";
-import { kvRateLimit } from "./store";
+import { kvCappedRateLimit, kvRateLimit } from "./store";
 
 export type GuardResult =
   | { ok: true }
   | { ok: false; status: number; error: string; retryAfterMs?: number };
+
+export const GLOBAL_ANALYSES_PER_WINDOW = 30;
+
+const GLOBAL_ANALYZE_KEY = "global:analyze-market";
+
+type GlobalLimitBackend = "kv" | "memory";
+
+export type GlobalLimitResult =
+  | { ok: true; backend: GlobalLimitBackend; reservedAt: number }
+  | {
+      ok: false;
+      status: 429 | 503;
+      error: string;
+      retryAfterMs: number;
+    };
 
 // First hop of x-forwarded-for when behind a proxy (Vercel sets this to the
 // real client IP); a shared fallback key otherwise so a single local instance
@@ -76,6 +92,54 @@ async function limit(
   }
   const local = checkRateLimit(clientKey);
   return { allowed: local.allowed, resetMs: local.resetMs };
+}
+
+async function globalLimit(
+  clientKey: string,
+  maxPerWindow: number,
+  error: string,
+  now: number
+): Promise<GlobalLimitResult> {
+  let kv:
+    | Awaited<ReturnType<typeof kvCappedRateLimit>>
+    | undefined;
+  try {
+    kv = await kvCappedRateLimit(clientKey, WINDOW_MS, maxPerWindow, now);
+  } catch {
+    return {
+      ok: false,
+      status: 503,
+      error:
+        "Traffic controls are temporarily unavailable. Please wait a moment and try again.",
+      retryAfterMs: WINDOW_MS,
+    };
+  }
+  if (kv) {
+    return kv.allowed
+      ? { ok: true, backend: "kv", reservedAt: now }
+      : { ok: false, status: 429, error, retryAfterMs: kv.resetMs };
+  }
+
+  const local = checkFixedWindowRateLimit(
+    clientKey,
+    WINDOW_MS,
+    maxPerWindow,
+    now
+  );
+  return local.allowed
+    ? { ok: true, backend: "memory", reservedAt: now }
+    : { ok: false, status: 429, error, retryAfterMs: local.resetMs };
+}
+
+export function enforceGlobalAnalyzeLimit(
+  now: number = Date.now()
+): Promise<GlobalLimitResult> {
+  return globalLimit(
+    GLOBAL_ANALYZE_KEY,
+    GLOBAL_ANALYSES_PER_WINDOW,
+    "Benchmark Scout is handling 30 analyses this minute. Please wait a moment and try again.",
+    now
+  );
 }
 
 export async function enforceGuard(request: Request): Promise<GuardResult> {
