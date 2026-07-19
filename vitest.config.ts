@@ -14,7 +14,11 @@ export default defineConfig({
     // Default env is node (lib tests); component tests opt into happy-dom
     // per-file via a `@vitest-environment happy-dom` docblock.
     environment: "node",
-    include: ["lib/**/*.test.ts", "components/**/*.test.tsx"],
+    include: [
+      "lib/**/*.test.ts",
+      "components/**/*.test.tsx",
+      "scripts/**/*.test.mjs",
+    ],
     setupFiles: ["./test/setup.ts"],
     coverage: {
       // Report-only: no thresholds enforced (visibility, not a gate).

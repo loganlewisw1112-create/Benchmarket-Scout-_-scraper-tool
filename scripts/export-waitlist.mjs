@@ -15,11 +15,13 @@
 //   equivalents, are set):
 //     - "waitlist:emails"  Redis SET of lowercase emails (membership only)
 //     - "waitlist:entries" Redis LIST of JSON strings, one per signup event:
-//         { email, at, source?, reportId? }
+//         { email, at, source?, reportId?, message? }
 //       Note: the app RPUSHes an entry on every signup attempt, even repeat
 //       ones for an email already on the list, so this list can contain more
 //       rows than there are unique emails. This script dedupes by email,
-//       keeping the earliest entry (i.e. the one that actually added them).
+//       keeping the earliest signup context while aggregating every non-empty
+//       feedback message from later events. Each aggregated message is labeled
+//       with the at/source/reportId context from its own event.
 //
 //   Filesystem fallback (local dev/CI, no KV env set), rooted at
 //   `${CACHE_DIR ?? "./.cache"}/store/`:
@@ -45,8 +47,12 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  csvEscape,
+  mergeWaitlistEntriesByEmail,
+} from "./export-waitlist-entries.mjs";
 
-const FIXED_COLUMNS = ["email", "at", "source", "reportId"];
+const FIXED_COLUMNS = ["email", "at", "source", "reportId", "message"];
 
 function usage() {
   return `Usage: node scripts/export-waitlist.mjs [--format csv|json|both] [--out <path>]
@@ -254,17 +260,6 @@ function parseEntries(rawLines) {
   return parsed;
 }
 
-// Dedupe by lowercased email, keeping the earliest occurrence (list/append
-// order is chronological), matching what the "emails" set actually tracks.
-function dedupeByEmail(entries) {
-  const seen = new Map();
-  for (const entry of entries) {
-    const key = entry.email.toLowerCase();
-    if (!seen.has(key)) seen.set(key, entry);
-  }
-  return [...seen.values()];
-}
-
 function extraColumns(entries) {
   const extras = new Set();
   for (const entry of entries) {
@@ -273,14 +268,6 @@ function extraColumns(entries) {
     }
   }
   return [...extras].sort();
-}
-
-function csvEscape(value) {
-  const s = value === undefined || value === null ? "" : String(value);
-  if (/[",\n\r]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
 }
 
 function toCsv(entries, columns) {
@@ -335,7 +322,7 @@ async function main() {
   }
 
   const parsedEntries = parseEntries(rawLines);
-  const uniqueEntries = dedupeByEmail(parsedEntries);
+  const uniqueEntries = mergeWaitlistEntriesByEmail(parsedEntries);
 
   if (uniqueEntries.length === 0) {
     throw new Error(

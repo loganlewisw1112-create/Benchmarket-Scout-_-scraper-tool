@@ -14,6 +14,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  checkFixedWindowRateLimit,
+  inspectFixedWindowRateLimit,
+  WINDOW_MS,
+} from "./rate-limit";
 
 const REPORT_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
 const ID_PATTERN = /^[A-Za-z0-9_-]{6,64}$/;
@@ -26,6 +31,52 @@ export type StoredReport = {
 
 export type WaitlistOutcome = "added" | "exists";
 
+export type WaitlistAdmission =
+  | { outcome: WaitlistOutcome }
+  | { outcome: "rate_limited"; retryAfterMs: number };
+
+export const WAITLIST_NEW_SIGNUPS_PER_WINDOW = 10;
+
+const WAITLIST_GLOBAL_LIMIT_KEY = "global:waitlist:new-signups";
+const WAITLIST_EMAILS_KEY = "waitlist:emails";
+const WAITLIST_ENTRIES_KEY = "waitlist:entries";
+
+const WAITLIST_ADMISSION_SCRIPT = `
+local email_exists = redis.call('SISMEMBER', KEYS[1], ARGV[1])
+if email_exists == 1 then
+  redis.call('RPUSH', KEYS[2], ARGV[2])
+  return {0, 0}
+end
+
+local current = tonumber(redis.call('GET', KEYS[3]) or '0')
+local maximum = tonumber(ARGV[3])
+if current >= maximum then
+  return {2, current}
+end
+
+current = redis.call('INCR', KEYS[3])
+if current == 1 then
+  redis.call('PEXPIRE', KEYS[3], tonumber(ARGV[4]))
+end
+redis.call('SADD', KEYS[1], ARGV[1])
+redis.call('RPUSH', KEYS[2], ARGV[2])
+return {1, current}
+`;
+
+const CAPPED_RATE_LIMIT_SCRIPT = `
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local maximum = tonumber(ARGV[1])
+if current >= maximum then
+  return {0, current}
+end
+
+current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[2]))
+end
+return {1, current}
+`;
+
 type KvConfig = { url: string; token: string };
 
 function kvConfig(): KvConfig | null {
@@ -37,6 +88,15 @@ function kvConfig(): KvConfig | null {
     "";
   if (url && token) return { url: url.replace(/\/$/, ""), token };
   return null;
+}
+
+function hasAnyKvConfig(): boolean {
+  return Boolean(
+    process.env.KV_REST_API_URL ||
+      process.env.KV_REST_API_TOKEN ||
+      process.env.UPSTASH_REDIS_REST_URL ||
+      process.env.UPSTASH_REDIS_REST_TOKEN
+  );
 }
 
 // Returns true when a durable external store is configured. Callers can use
@@ -103,13 +163,26 @@ async function fsGetReport(id: string): Promise<string | null> {
   }
 }
 
-async function fsAddWaitlist(
+let fsWaitlistAdmissionTail: Promise<void> = Promise.resolve();
+
+function serializeFsWaitlistAdmission<T>(operation: () => Promise<T>): Promise<T> {
+  const run = fsWaitlistAdmissionTail.then(operation, operation);
+  fsWaitlistAdmissionTail = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
+async function fsAdmitWaitlist(
   email: string,
-  entry: string
-): Promise<WaitlistOutcome> {
+  entry: string,
+  now: number
+): Promise<WaitlistAdmission> {
   const dir = storeRoot();
   await fs.mkdir(dir, { recursive: true });
   const setFile = path.join(dir, "waitlist-emails.json");
+  const entriesFile = path.join(dir, "waitlist-entries.jsonl");
   let seen: string[] = [];
   try {
     seen = JSON.parse(await fs.readFile(setFile, "utf8")) as string[];
@@ -118,12 +191,38 @@ async function fsAddWaitlist(
   }
   const normalized = email.toLowerCase();
   const exists = seen.includes(normalized);
-  if (!exists) {
-    seen.push(normalized);
-    await fs.writeFile(setFile, JSON.stringify(seen, null, 2), "utf8");
-    await fs.appendFile(path.join(dir, "waitlist-entries.jsonl"), entry + "\n");
+  if (exists) {
+    await fs.appendFile(entriesFile, entry + "\n");
+    return { outcome: "exists" };
   }
-  return exists ? "exists" : "added";
+
+  const capacity = inspectFixedWindowRateLimit(
+    WAITLIST_GLOBAL_LIMIT_KEY,
+    WINDOW_MS,
+    WAITLIST_NEW_SIGNUPS_PER_WINDOW,
+    now
+  );
+  if (!capacity.allowed) {
+    return { outcome: "rate_limited", retryAfterMs: capacity.resetMs };
+  }
+
+  const previousSeen = [...seen];
+  seen.push(normalized);
+  await fs.writeFile(setFile, JSON.stringify(seen, null, 2), "utf8");
+  try {
+    await fs.appendFile(entriesFile, entry + "\n");
+  } catch (error) {
+    // Keep the two-file fallback consistent when the append fails.
+    await fs.writeFile(setFile, JSON.stringify(previousSeen, null, 2), "utf8");
+    throw error;
+  }
+  checkFixedWindowRateLimit(
+    WAITLIST_GLOBAL_LIMIT_KEY,
+    WINDOW_MS,
+    WAITLIST_NEW_SIGNUPS_PER_WINDOW,
+    now
+  );
+  return { outcome: "added" };
 }
 
 // ---- public API ------------------------------------------------------------
@@ -164,25 +263,46 @@ export async function getReport(id: string): Promise<StoredReport | null> {
   }
 }
 
-export async function addWaitlistEmail(
+export async function admitWaitlistEmail(
   email: string,
-  meta: Record<string, unknown> = {}
-): Promise<WaitlistOutcome> {
+  meta: Record<string, unknown> = {},
+  now: number = Date.now()
+): Promise<WaitlistAdmission> {
+  const normalized = email.toLowerCase();
   const entry = JSON.stringify({
-    email: email.toLowerCase(),
-    at: new Date().toISOString(),
+    email: normalized,
+    at: new Date(now).toISOString(),
     ...meta,
   });
   const cfg = kvConfig();
-  if (!cfg) return fsAddWaitlist(email, entry);
+  if (!cfg) {
+    if (hasAnyKvConfig()) throw new Error("Incomplete KV configuration");
+    return serializeFsWaitlistAdmission(() =>
+      fsAdmitWaitlist(normalized, entry, now)
+    );
+  }
 
-  const added = (await kvCommand(cfg, [
-    "SADD",
-    "waitlist:emails",
-    email.toLowerCase(),
-  ])) as number;
-  await kvCommand(cfg, ["RPUSH", "waitlist:entries", entry]);
-  return added === 1 ? "added" : "exists";
+  const windowId = Math.floor(now / WINDOW_MS);
+  const resetMs = WINDOW_MS - (now % WINDOW_MS);
+  const limitKey = `rl:${WAITLIST_GLOBAL_LIMIT_KEY}:${windowId}`;
+  const result = await kvCommand(cfg, [
+    "EVAL",
+    WAITLIST_ADMISSION_SCRIPT,
+    3,
+    WAITLIST_EMAILS_KEY,
+    WAITLIST_ENTRIES_KEY,
+    limitKey,
+    normalized,
+    entry,
+    WAITLIST_NEW_SIGNUPS_PER_WINDOW,
+    resetMs,
+  ]);
+  if (!Array.isArray(result)) throw new Error("Invalid KV admission response");
+  const code = Number(result[0]);
+  if (code === 0) return { outcome: "exists" };
+  if (code === 1) return { outcome: "added" };
+  if (code === 2) return { outcome: "rate_limited", retryAfterMs: resetMs };
+  throw new Error("Unknown KV admission response");
 }
 
 // Fixed-window rate-limit counter backed by KV, for distributed limiting
@@ -195,7 +315,10 @@ export async function kvRateLimit(
   now: number = Date.now()
 ): Promise<{ allowed: boolean; remaining: number; resetMs: number } | null> {
   const cfg = kvConfig();
-  if (!cfg) return null;
+  if (!cfg) {
+    if (hasAnyKvConfig()) throw new Error("Incomplete KV configuration");
+    return null;
+  }
 
   const windowId = Math.floor(now / windowMs);
   const key = `rl:${clientKey}:${windowId}`;
@@ -206,6 +329,41 @@ export async function kvRateLimit(
   const resetMs = windowMs - (now % windowMs);
   return {
     allowed: count <= maxPerWindow,
+    remaining: Math.max(0, maxPerWindow - count),
+    resetMs,
+  };
+}
+
+// Atomic capped variant for global ceilings. Unlike the legacy per-IP limiter,
+// a denied attempt does not increment the Redis counter.
+export async function kvCappedRateLimit(
+  clientKey: string,
+  windowMs: number,
+  maxPerWindow: number,
+  now: number = Date.now()
+): Promise<{ allowed: boolean; remaining: number; resetMs: number } | null> {
+  const cfg = kvConfig();
+  if (!cfg) {
+    if (hasAnyKvConfig()) throw new Error("Incomplete KV configuration");
+    return null;
+  }
+
+  const windowId = Math.floor(now / windowMs);
+  const key = `rl:${clientKey}:${windowId}`;
+  const resetMs = windowMs - (now % windowMs);
+  const result = await kvCommand(cfg, [
+    "EVAL",
+    CAPPED_RATE_LIMIT_SCRIPT,
+    1,
+    key,
+    maxPerWindow,
+    resetMs,
+  ]);
+  if (!Array.isArray(result)) throw new Error("Invalid KV rate-limit response");
+  const allowed = Number(result[0]) === 1;
+  const count = Number(result[1]);
+  return {
+    allowed,
     remaining: Math.max(0, maxPerWindow - count),
     resetMs,
   };

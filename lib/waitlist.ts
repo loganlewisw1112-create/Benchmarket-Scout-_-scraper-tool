@@ -14,6 +14,7 @@ export const waitlistRequestSchema = z.object({
   // anything sensitive. Length-capped to avoid abuse.
   source: z.string().trim().max(80).optional(),
   reportId: z.string().trim().max(64).optional(),
+  message: z.string().trim().max(1_000).optional(),
 });
 
 export type ValidatedWaitlistRequest = z.infer<typeof waitlistRequestSchema>;
