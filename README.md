@@ -1,181 +1,200 @@
 # Benchmark Scout
 
-## What it does
+Local competitor intelligence built entirely from public web signals.
 
-Benchmark Scout is a real-data-only local competitor intelligence tool. It
-finds businesses through Nominatim and OpenStreetMap, audits public websites,
-scans public news, ranks only successfully audited entities, generates
-source-backed reports, and exports the same report to PDF.
+**Live (open beta):** https://benchmark-scout.vercel.app
 
-## Run
+Give it a business, a type, and a city. It finds the real competitors nearby,
+audits their public websites, pulls public news mentions, scores what it can
+actually verify, and writes up a source-backed report you can read on screen,
+share by link, or export to PDF.
+
+The one rule the whole thing is built around: **it never makes a number up.**
+Every figure traces back to something it actually fetched. When the evidence
+isn't there, it says so instead of guessing.
+
+## How it works
+
+The analysis runs as a pipeline, one stage feeding the next:
+
+1. **Geocode** the market with Nominatim to get a real bounding box.
+2. **Discover** nearby businesses of the same type from OpenStreetMap via
+   Overpass.
+3. **Audit** each one's public website directly — structure, signals, linked
+   public pages — no paid data brokers in the loop.
+4. **Score** only the businesses whose sites actually audited. Anything it
+   couldn't verify stays visible but unranked.
+5. **Write** the report from those scores: findings, risks, a ranked
+   comparison, and recommendations, each tied to a source ID.
+
+## The real-data rule
+
+This is the part that makes the tool worth trusting, so it's enforced in code,
+not just intended.
+
+Every production report carries `schemaVersion: 2`,
+`provenance.policy: "real-only"`, `containsSyntheticData: false`, and a full
+Sources Appendix. A prebuild gate (`npm run check:real-data-only`) fails the
+build if any demo or mock path can reach production.
+
+When evidence is missing or unreachable, the value is `null` and renders as
+`N/A` — it's never backfilled with an estimate. A discovered business whose
+site won't audit stays in the list but sits out the rankings. And if a request
+turns up no usable real evidence at all, the API returns
+`422 INSUFFICIENT_REAL_DATA` and saves nothing. An empty answer is the honest
+answer.
+
+Report prose is generated from templates driven by the computed scores and
+signals — **no LLM writes report content.** Findings are directional
+observations about public signals, labeled with a confidence level, not claims
+about a company's internal reality.
+
+## Where the data comes from
+
+- **Nominatim** — geocoding the market.
+- **Overpass / OpenStreetMap** — discovering local competitors.
+- **Public websites** — fetched directly for the audit, no third-party APIs.
+- **GDELT and linked public articles** — public news mentions.
+
+And, deliberately, nowhere else. No paid APIs, no accounts, and nothing from
+Google Places, Yelp, SerpApi, LinkedIn, Instagram, TikTok, or X. Social
+profiles show up only when a public page links to them.
+
+## Run it locally
 
 ```bash
 npm install
 npm run dev
+# http://localhost:3000
 ```
 
-## Checks
+Set a real contact address in your user agent before hitting the public
+services:
 
 ```bash
-npm run lint          # eslint
-npx tsc --noEmit      # typecheck
-npm test              # vitest — offline, deterministic (no network)
-npm run test:coverage # same suite with a v8 coverage report (report-only)
-npm run check:real-data-only # reject production demo/mock paths
-npm run build         # production build (warning-free)
+APP_USER_AGENT="BenchmarkScout/0.1 (contact: you@yourdomain.com)"
 ```
 
-CI (`.github/workflows/ci.yml`) runs lint, typecheck, test, and build on
-every push and pull request.
+> Don't leave `example.com` in there. Nominatim's and Overpass's edge networks
+> block any request whose User-Agent contains `example.com` — it's the classic
+> unconfigured-scraper tell, so their WAFs reject it outright with an unhelpful
+> 403/406. Use an address you actually own.
 
-## Open
+Other environment variables you may want locally:
 
-http://localhost:3000
+```bash
+CACHE_DIR=".cache"        # where fetched data and reports are cached
+STRICT_ROBOTS=false       # when true, every audit fetch checks robots.txt first
+MAINTENANCE_MODE=false    # when true, disables analysis but keeps /api/health up
+```
 
-## Real-only data policy
+## Tests and checks
 
-Production reports use only user input, Nominatim, OpenStreetMap/Overpass,
-public websites, linked public pages, and public news articles. Every report
-has `schemaVersion: 2`, `provenance.policy: "real-only"`,
-`containsSyntheticData: false`, and a complete Sources Appendix.
+```bash
+npm run lint                  # eslint
+npx tsc --noEmit              # typecheck
+npm test                      # vitest — offline and deterministic, no network
+npm run test:coverage         # same suite with a v8 coverage report
+npm run check:real-data-only  # reject demo/mock paths reaching production
+npm run build                 # production build, warning-free
+```
 
-Missing or inaccessible evidence is `null` and renders as `N/A`. Discovered
-businesses whose sites could not be audited remain visible but unscored.
-Only successfully audited businesses participate in quantitative rankings.
-If no usable real evidence exists, the API returns
-`422 INSUFFICIENT_REAL_DATA` and saves nothing.
+The vitest suite runs entirely offline: SSRF guards, input validation, scoring,
+discovery, robots parsing, rate limiting, provenance, storage, and route
+behavior. CI (`.github/workflows/ci.yml`) runs lint, typecheck, test, and build
+on every push and pull request.
 
-## Free sources
+## Deployment
 
-- **Nominatim** for market geocoding
-- **Overpass / OpenStreetMap** for local competitor discovery
-- **Public websites** for website audits (fetched directly, no paid APIs)
-- **GDELT and linked public articles** for public news mentions
+The hosted build runs on Vercel with an Upstash (Vercel KV) store behind it.
+Full launch and rollback steps live in [DEPLOY.md](./DEPLOY.md).
 
-No paid APIs, no accounts, no Google Places/Yelp/SerpApi/LinkedIn/Instagram/
-TikTok/X APIs are used anywhere in this project.
+Hosting environment variables, on top of the local ones:
 
-## PDF export
+```bash
+CACHE_DIR="/tmp/.cache"       # the Vercel project root is read-only
+KV_REST_API_URL=...           # Upstash / Vercel KV — durable reports + waitlist
+KV_REST_API_TOKEN=...         # falls back to the filesystem store locally
+SCOUT_API_KEY=...             # optional shared secret; gates analyze + waitlist
+SAMPLE_REFRESH_SECRET=...     # protects the sample-refresh route
+MAINTENANCE_MODE=true         # flip off once launch gates pass
+```
 
-After a report is generated, click "Download PDF Report." PDF export is
-generated client-side (via `jsPDF` + `jspdf-autotable`) from the same report
-data already shown on the dashboard — no second backend call is made.
+`MAINTENANCE_MODE=true` disables analysis, samples, and stored/shared reports
+while keeping `/api/health` at `200` with `maintenance: true` — a clean holding
+state, not an outage.
 
-## Report quality
+Public endpoints:
 
-Reports are concise, deterministic, evidence-backed, and confidence-labeled.
-Findings are directional public-signal observations, not verified internal
-facts. Report text is generated from templates driven by computed scores and
-signals — no LLM is used to generate report content. Findings, risks,
-recommendations, signals, and competitors reference report-local source IDs
-that resolve in the Sources Appendix.
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/analyze-market` | Run the analysis pipeline (10 req/min per client) |
+| `GET /api/health` | Liveness: status, uptime, sample freshness |
+| `GET /api/sample-report` | A cached real sample, no external calls |
+| `POST /api/sample-report/refresh` | Protected refresh for one catalog sample |
+| `GET /api/reports/[id]` | A saved report as JSON |
+| `POST /api/waitlist` | Join the waitlist (validated, rate-limited) |
+| `GET /r/[id]` | Shareable, read-only report page |
 
-## Project structure
+## Project layout
 
 ```
 app/
-  page.tsx                      Dashboard UI (form, loading, results)
-  api/analyze-market/route.ts   POST endpoint running the analysis pipeline
-  api/health/route.ts           GET liveness endpoint (status/uptime/timestamp)
-  api/sample-report/route.ts    GET a cached real Alameda County sample
-  api/sample-report/refresh/    Protected catalog snapshot refresh
-  api/reports/[id]/route.ts     Read a validated v2 report
-
-components/                     Dashboard UI building blocks
-components/*.test.tsx            Component tests (happy-dom + Testing Library)
-lib/                             Pipeline: geocoding, discovery, auditing,
-                                  signal extraction, scoring, report/PDF gen,
-                                  rate limiting, robots.txt compliance,
-                                  structured logging (lib/logger.ts)
-lib/*.test.ts                    Vitest suite (offline: SSRF guard, validation,
-                                  scoring, discovery, robots, rate limiting,
-                                  provenance, storage, and route behavior)
-instrumentation.ts               Next.js hooks: startup log + captured-error log
-.github/workflows/               CI and sequential real-sample refresh
+  page.tsx                     Dashboard: form, loading, results
+  r/[id]/                      Shareable read-only report page
+  api/analyze-market/          The analysis pipeline endpoint
+  api/reports/[id]/            Read a validated v2 report
+  api/sample-report/           Cached real samples (+ protected refresh)
+  api/waitlist/                Waitlist capture
+  api/health/                  Liveness endpoint
+components/                    Dashboard UI, with co-located *.test.tsx
+lib/                           The pipeline: geocoding, discovery, auditing,
+                               signals, scoring, report + PDF generation,
+                               rate limiting, robots.txt, storage, logging
+scripts/                      Operator tooling (waitlist + report-count exports,
+                               real-data gate, sample refresh)
+instrumentation.ts            Startup and captured-error logging hooks
 ```
 
-The API route is rate limited (10 requests/minute per client) since each
-analysis fans out to several free public services. `/api/health` is exempt.
+PDF export happens client-side (`jsPDF` + `jspdf-autotable`) from the report
+data already on screen — no second backend call.
 
-## Observability
-
-Server logs are single-line JSON (`lib/logger.ts`) with per-request
-correlation: every `/api/analyze-market` response carries an `x-request-id`
-header, and all pipeline log lines for that request carry the same id
-(propagated via AsyncLocalStorage — no logger parameter threading). Extend
-logging by importing `logger` from `lib/logger.ts`; wire a real provider
-later by swapping the `console.*` sink in that one file.
-
-## Limitations
-
-- Free OSM data does not reliably include ratings or reviews.
-- Social platforms are not scraped behind logins or restrictions — only
-  profile links found on public pages are surfaced.
-- Findings are public signals, not verified internal business facts.
-- Public data can be sparse, stale, or incomplete; unavailable values remain
-  unscored and display as `N/A`.
-- Old reports without valid v2 real-only provenance are intentionally
-  inaccessible and return `410 LEGACY_REPORT_UNAVAILABLE`.
+Server logs are single-line JSON (`lib/logger.ts`). Every
+`/api/analyze-market` response carries an `x-request-id`, and every log line
+for that request carries the same id, propagated through AsyncLocalStorage so
+nothing has to thread a logger around. Point it at a real log provider by
+swapping the `console.*` sink in that one file.
 
 ## Safety
 
-- No private pages, no login bypass, no CAPTCHA bypass, no paywall bypass.
-- robots.txt compliance (`lib/robots.ts`): set `STRICT_ROBOTS=true` and every
-  website-audit fetch (homepages, linked pages, and each redirect hop) first
-  checks the site's robots.txt, honoring user-agent groups, `Allow`/`Disallow`
-  longest-match rules, `*` wildcards, and `$` anchors. Results are cached for
-  24 hours; an unreachable or malformed robots.txt fails open so audits keep
-  working. Off by default.
-- SSRF protection (`lib/url-safety.ts`) blocks fetches to localhost, private
-  IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), link-local addresses
-  (including the 169.254.169.254 cloud metadata address), and IPv6
-  loopback/private/link-local ranges. DNS results are re-checked, not just
-  the literal hostname, and redirects are capped and re-validated.
+- **No bypassing anything.** No private pages, no login/paywall/CAPTCHA
+  bypass — only what's publicly reachable.
+- **SSRF protection** (`lib/url-safety.ts`) blocks fetches to localhost,
+  private IP ranges (`10/8`, `172.16/12`, `192.168/16`), link-local addresses
+  (including the `169.254.169.254` cloud-metadata endpoint), and the IPv6
+  equivalents. It re-checks resolved DNS, not just the hostname, and caps and
+  re-validates redirects.
+- **robots.txt** (`lib/robots.ts`, opt-in via `STRICT_ROBOTS=true`): every
+  audit fetch — homepages, linked pages, each redirect hop — first checks the
+  site's robots.txt, honoring user-agent groups, longest-match
+  `Allow`/`Disallow`, `*` wildcards, and `$` anchors. Results cache for 24h; an
+  unreachable or malformed file fails open so audits keep working.
 
-## Environment variables
+## Known limits
 
-```bash
-MAINTENANCE_MODE=true
-APP_USER_AGENT="BenchmarkScout/0.1 (contact: your-email@yourdomain.com)"
-CACHE_DIR=".cache"
-STRICT_ROBOTS=false
-SAMPLE_REFRESH_SECRET="replace-with-a-long-random-secret"
-```
+- Free OSM data doesn't reliably carry ratings or reviews.
+- Public data is often sparse, stale, or incomplete; unavailable values stay
+  unscored and show as `N/A`.
+- Findings are public signals, not verified internal business facts.
+- Social platforms are never scraped behind logins — only publicly linked
+  profiles surface.
+- Old reports without valid v2 real-only provenance are intentionally
+  unreadable and return `410 LEGACY_REPORT_UNAVAILABLE`.
 
-`MAINTENANCE_MODE=true` disables analysis, samples, stored reports, and shared
-reports while keeping `/api/health` at `200` with `maintenance:true`.
-`SAMPLE_REFRESH_SECRET` protects the real-sample refresh endpoint.
+## Working on it
 
-> **Important:** don't use `example.com` (or any address at that domain) in
-> `APP_USER_AGENT`. Nominatim's and Overpass's edge networks actively block
-> any request whose User-Agent contains `example.com` — it's a common
-> leftover placeholder in unconfigured scrapers, so their WAFs treat it as a
-> signal to reject the request outright (a 403/406 with no useful error
-> body). Use a real contact address instead.
+Stack: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Zod, Vitest. Node 22+.
 
-## Hosted deployment (Vercel)
-
-See [DEPLOY.md](./DEPLOY.md) for the v0.4.0 maintenance-first launch and
-rollback runbook. Report sharing (`/r/<id>`), waitlist capture
-(`/api/waitlist`), cached real samples, and per-IP rate limiting are wired for
-the public release.
-
-### Additional environment variables
-
-- `CACHE_DIR` - set to `/tmp/.cache` on Vercel (read-only project root).
-- `KV_REST_API_URL` / `KV_REST_API_TOKEN` - Vercel KV (Upstash); required for
-  durable saved reports and waitlist. Falls back to the filesystem locally.
-- `SCOUT_API_KEY` - optional shared secret; when set, `/api/analyze-market`
-  and `/api/waitlist` require it via the `x-scout-key` header or `?key=`.
-- `MAINTENANCE_MODE` - set to `true` until every v0.4.0 launch gate passes.
-- `SAMPLE_REFRESH_SECRET` - required by the protected sample refresh route.
-
-### New endpoints
-
-- `GET /api/reports/[id]` - fetch a saved report as JSON.
-- `GET /api/sample-report?exclude=<sampleId>` - fetch one active cached real
-  sample without external analysis.
-- `POST /api/sample-report/refresh` - protected sequential refresh for one
-  catalog ID.
-- `POST /api/waitlist` - `{ email, source?, reportId? }`, validated + rate-limited.
-- `GET /r/[id]` - shareable read-only report page.
+Heads up for contributors: this repo runs Next 16, which changed enough that
+habits from older versions will bite you. See [AGENTS.md](./AGENTS.md) — read
+the relevant guide under `node_modules/next/dist/docs/` before writing app code.
