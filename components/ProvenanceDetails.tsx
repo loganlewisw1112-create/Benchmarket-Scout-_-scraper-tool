@@ -1,8 +1,5 @@
+import { Fragment } from "react";
 import type { SourceId, SourceReference } from "@/lib/types";
-
-export function formatCitationMarkers(sourceIds: readonly SourceId[]): string {
-  return sourceIds.map((sourceId) => `[${sourceId}]`).join(" ");
-}
 
 export function CitationMarkers({
   sourceIds,
@@ -11,12 +8,22 @@ export function CitationMarkers({
 }) {
   if (sourceIds.length === 0) return null;
 
+  // Findings can cite 20+ sources. `whitespace-nowrap` must stay scoped to a
+  // single marker so "[S12]" never splits across lines; applying it to the
+  // whole run made it one unbreakable inline box that overflowed its grid
+  // column and painted over the neighbouring column. The explicit spaces
+  // between markers are the wrap opportunities.
   return (
     <span
-      className="ml-1 whitespace-nowrap text-xs font-medium text-indigo-600"
+      className="ml-1 text-xs font-medium text-indigo-600"
       aria-label={`Sources ${sourceIds.join(", ")}`}
     >
-      {formatCitationMarkers(sourceIds)}
+      {sourceIds.map((sourceId, idx) => (
+        <Fragment key={sourceId}>
+          {idx > 0 ? " " : null}
+          <span className="whitespace-nowrap">[{sourceId}]</span>
+        </Fragment>
+      ))}
     </span>
   );
 }
