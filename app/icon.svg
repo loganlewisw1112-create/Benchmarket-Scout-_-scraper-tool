@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Benchmark Scout">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#4338ca"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="url(#tile)"/>
+  <rect x="16" y="32" width="8" height="14" rx="2.5" fill="#ffffff" opacity="0.55"/>
+  <rect x="28" y="24" width="8" height="22" rx="2.5" fill="#ffffff" opacity="0.78"/>
+  <rect x="40" y="16" width="8" height="30" rx="2.5" fill="#ffffff"/>
+  <circle cx="44" cy="13" r="6.5" fill="#ffffff"/>
+  <circle cx="44" cy="13" r="2.8" fill="#4f46e5"/>
+</svg>
