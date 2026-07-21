@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 64" width="384" height="64" role="img" aria-label="Benchmark Scout">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#4338ca"/>
+    </linearGradient>
+  </defs>
+  <!-- mark: benchmark bars + a locator on the leading bar -->
+  <rect x="8" y="10" width="44" height="44" rx="12" fill="url(#tile)"/>
+  <rect x="17" y="36" width="6" height="10" rx="2" fill="#ffffff" opacity="0.55"/>
+  <rect x="27" y="30" width="6" height="16" rx="2" fill="#ffffff" opacity="0.78"/>
+  <rect x="37" y="24" width="6" height="22" rx="2" fill="#ffffff"/>
+  <circle cx="40" cy="19" r="5.5" fill="#ffffff"/>
+  <circle cx="40" cy="19" r="2.4" fill="#4f46e5"/>
+  <!-- wordmark -->
+  <text x="66" y="40" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="27" font-weight="700" letter-spacing="-0.4" fill="#0f172a">Benchmark Scout</text>
+  <!-- beta pill -->
+  <rect x="298" y="21" width="46" height="22" rx="11" fill="#e0e7ff"/>
+  <text x="321" y="36" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="0.3" fill="#4338ca">beta</text>
+</svg>

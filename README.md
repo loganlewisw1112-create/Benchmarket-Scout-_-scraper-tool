@@ -1,8 +1,28 @@
-# Benchmark Scout
+<div align="center">
 
-Local competitor intelligence built entirely from public web signals.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.svg">
+  <img alt="Benchmark Scout" src=".github/assets/logo-light.svg" width="380">
+</picture>
 
-**Live (open beta):** https://benchmark-scout.vercel.app
+<p><strong>Local competitor intelligence, built entirely from public web signals.</strong></p>
+
+[![Live — open beta](https://img.shields.io/badge/live-open%20beta-4f46e5?style=flat-square)](https://benchmark-scout.vercel.app)
+[![CI](https://github.com/loganlewisw1112-create/Benchmarket-Scout-_-scraper-tool/actions/workflows/ci.yml/badge.svg)](https://github.com/loganlewisw1112-create/Benchmarket-Scout-_-scraper-tool/actions/workflows/ci.yml)
+![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=nextdotjs)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript)
+![Data: real-only](https://img.shields.io/badge/data-real--only-4338ca?style=flat-square)
+![License: MIT](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)
+
+<a href="https://benchmark-scout.vercel.app"><strong>benchmark-scout.vercel.app&nbsp;→</strong></a>
+
+</div>
+
+<p align="center">
+  <a href="https://benchmark-scout.vercel.app">
+    <img alt="Benchmark Scout — enter a business, type, and city; get a source-backed report" src=".github/assets/home.png" width="840">
+  </a>
+</p>
 
 Give it a business, a type, and a city. It finds the real competitors nearby,
 audits their public websites, pulls public news mentions, scores what it can
@@ -26,6 +46,11 @@ The analysis runs as a pipeline, one stage feeding the next:
    couldn't verify stays visible but unranked.
 5. **Write** the report from those scores: findings, risks, a ranked
    comparison, and recommendations, each tied to a source ID.
+
+<p align="center">
+  <img alt="A Benchmark Scout report: score cards and a ranked local competitor landscape" src=".github/assets/report.png" width="840">
+</p>
+<p align="center"><sub>A slice of a real report — your score, your rank, and the ranked competitor landscape, every row sourced from public OSM data.</sub></p>
 
 ## The real-data rule
 
@@ -107,7 +132,8 @@ on every push and pull request.
 ## Deployment
 
 The hosted build runs on Vercel with an Upstash (Vercel KV) store behind it.
-Full launch and rollback steps live in [DEPLOY.md](./DEPLOY.md).
+It's live in open beta at **[benchmark-scout.vercel.app](https://benchmark-scout.vercel.app)**;
+full launch and rollback steps live in [DEPLOY.md](./DEPLOY.md).
 
 Hosting environment variables, on top of the local ones:
 
@@ -198,3 +224,7 @@ Stack: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Zod, Vitest. Node 22+.
 Heads up for contributors: this repo runs Next 16, which changed enough that
 habits from older versions will bite you. See [AGENTS.md](./AGENTS.md) — read
 the relevant guide under `node_modules/next/dist/docs/` before writing app code.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
