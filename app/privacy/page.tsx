@@ -18,9 +18,14 @@ const privacyPoints = [
       "We process the business name, website, business type, and city or market you enter to build a report.",
   },
   {
-    title: "There are no user accounts or tracking pixels.",
+    title: "No accounts, and no advertising or email tracking.",
     detail:
       "You can use Benchmark Scout without creating an account, and we do not add advertising or email tracking pixels.",
+  },
+  {
+    title: "We count anonymous page views.",
+    detail:
+      "Vercel Web Analytics records which pages are visited so we can tell whether people are finding and using the tool. It is cookieless, does not build a profile of you, and does not follow you to other sites.",
   },
   {
     title: "The service uses Vercel and Upstash.",
