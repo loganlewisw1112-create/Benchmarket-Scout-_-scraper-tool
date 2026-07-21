@@ -12,7 +12,7 @@
 ![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=nextdotjs)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript)
 ![Data: real-only](https://img.shields.io/badge/data-real--only-4338ca?style=flat-square)
-![License: MIT](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)
+![License: Proprietary](https://img.shields.io/badge/license-proprietary-64748b?style=flat-square)
 
 <a href="https://benchmark-scout.vercel.app"><strong>benchmark-scout.vercel.app&nbsp;→</strong></a>
 
@@ -227,4 +227,5 @@ the relevant guide under `node_modules/next/dist/docs/` before writing app code.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+Proprietary — all rights reserved. This is **not** open source; no permission
+is granted to use, copy, publish, distribute, or sell it. See [LICENSE](./LICENSE).

@@ -2,6 +2,7 @@
   "name": "benchmark-scout",
   "version": "0.4.0",
   "private": true,
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "next dev",
     "check:real-data-only": "node scripts/check-real-data-only.mjs",
