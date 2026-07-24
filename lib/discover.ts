@@ -1,4 +1,5 @@
 import {
+  DEFAULT_DISCOVERY_RADIUS_METERS,
   queryOverpassDetailed,
   resolveOsmTags,
   type OverpassElement,
@@ -195,7 +196,7 @@ export async function discoverCompetitors(args: {
     args.businessType,
     args.lat,
     args.lon,
-    12_000,
+    DEFAULT_DISCOVERY_RADIUS_METERS,
     { signal: args.signal, budgetMs: args.budgetMs }
   );
   const candidates = removeUserBusiness(

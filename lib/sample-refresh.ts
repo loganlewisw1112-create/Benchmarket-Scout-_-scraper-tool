@@ -57,8 +57,9 @@ export function sampleRefreshViolations(report: AnalyzeMarketResponse): string[]
   const realCompetitors = report.competitors.filter(
     (competitor) => competitor.source === "overpass"
   );
-  if (realCompetitors.length < 6) {
-    violations.push(`Only ${realCompetitors.length} real competitors were found; 6 are required.`);
+  // Softened for OSM-sparse local niches while still requiring real evidence.
+  if (realCompetitors.length < 4) {
+    violations.push(`Only ${realCompetitors.length} real competitors were found; 4 are required.`);
   }
   const successfulCompetitorAudits = realCompetitors.filter(
     (competitor) =>
@@ -66,9 +67,9 @@ export function sampleRefreshViolations(report: AnalyzeMarketResponse): string[]
       competitor.auditStatus === "complete" &&
       competitor.websiteAudit.auditStatus === "complete"
   ).length;
-  if (successfulCompetitorAudits < 3) {
+  if (successfulCompetitorAudits < 2) {
     violations.push(
-      `Only ${successfulCompetitorAudits} competitor website audits succeeded; 3 are required.`
+      `Only ${successfulCompetitorAudits} competitor website audits succeeded; 2 are required.`
     );
   }
   return violations;

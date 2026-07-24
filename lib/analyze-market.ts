@@ -37,9 +37,9 @@ import type {
 import type { ValidatedAnalyzeMarketRequest } from "./validation";
 
 export const ANALYSIS_TIMING_BUDGETS = {
-  overallMs: 50_000,
+  overallMs: 55_000,
   geocodeMs: 5_000,
-  overpassMs: 18_000,
+  overpassMs: 22_000,
   auditPerEntityMs: 7_000,
   auditConcurrency: 4,
   newsPerEntityMs: 3_500,

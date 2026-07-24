@@ -1,5 +1,6 @@
 import { SourceUnavailableError } from "./pipeline-errors";
 import {
+  abortableDelay,
   createTimedSignal,
   remainingBudgetMs,
   type RequestBudgetOptions,
@@ -902,8 +903,10 @@ const OVERPASS_ENDPOINTS = [
   "https://overpass.private.coffee/api/interpreter",
 ];
 
-const ATTEMPTS_PER_ENDPOINT = 1;
+const ATTEMPTS_PER_ENDPOINT = 3;
 const PER_REQUEST_TIMEOUT_MS = 8_500;
+const RETRY_BACKOFF_MS = [0, 2_000, 5_000] as const;
+export const DEFAULT_DISCOVERY_RADIUS_METERS = 18_000;
 
 // Staged resolution (esp. the direct-tag probe) can produce many candidate tag
 // clauses. Cap them so a single Overpass request stays polite and fast; the
@@ -976,10 +979,10 @@ export async function queryOverpassDetailed(
   businessType: string,
   lat: number,
   lon: number,
-  radiusMeters = 12000,
+  radiusMeters = DEFAULT_DISCOVERY_RADIUS_METERS,
   options: RequestBudgetOptions = {}
 ): Promise<OverpassQueryResult> {
-  const deadlineAt = Date.now() + (options.budgetMs ?? 15_000);
+  const deadlineAt = Date.now() + (options.budgetMs ?? 18_000);
   const tagPairs = resolveOsmTags(businessType);
 
   // Honest floor: nothing resolved to a live OSM tag, so there is nothing to
@@ -1017,10 +1020,18 @@ out center tags ${OUTPUT_LIMIT};`;
           options.signal?.reason ?? new Error("Overpass time budget exhausted");
         break;
       }
+      const backoffMs = RETRY_BACKOFF_MS[attempt - 1] ?? 5_000;
+      if (backoffMs > 0) {
+        if (backoffMs >= remaining) {
+          lastError = new Error("Overpass time budget exhausted");
+          break;
+        }
+        await abortableDelay(backoffMs, options.signal);
+      }
       try {
         const result = await fetchOverpassOnce(endpoint, query, {
           signal: options.signal,
-          budgetMs: remaining,
+          budgetMs: remainingBudgetMs(deadlineAt),
         });
         return {
           ...result,
@@ -1044,7 +1055,7 @@ export async function queryOverpass(
   businessType: string,
   lat: number,
   lon: number,
-  radiusMeters = 12000,
+  radiusMeters = DEFAULT_DISCOVERY_RADIUS_METERS,
   options: RequestBudgetOptions = {}
 ): Promise<OverpassElement[]> {
   return (

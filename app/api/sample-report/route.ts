@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { enforceGuard } from "@/lib/api-guard";
 import { logger, serializeError, withRequestId } from "@/lib/logger";
 import { isMaintenanceMode, MAINTENANCE_RESPONSE } from "@/lib/maintenance";
-import { selectRandomActiveSample } from "@/lib/sample-pool";
+import { sampleFreshness, selectRandomActiveSample } from "@/lib/sample-pool";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,11 +56,13 @@ export async function GET(request: Request) {
         );
       }
 
+      const freshness = sampleFreshness(snapshot);
       logger.info("sample-report request completed", {
         durationMs: Date.now() - startedAt,
         status: 200,
         sampleId: snapshot.sampleId,
         reportId: snapshot.reportId,
+        freshness,
       });
 
       return NextResponse.json(
@@ -68,6 +70,7 @@ export async function GET(request: Request) {
           sampleId: snapshot.sampleId,
           reportId: snapshot.reportId,
           generatedAt: snapshot.generatedAt,
+          freshness,
           report: snapshot.report,
         },
         { status: 200, headers: { "x-request-id": requestId } }

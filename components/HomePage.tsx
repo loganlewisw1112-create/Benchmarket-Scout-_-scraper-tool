@@ -25,6 +25,9 @@ export default function HomePage({
   const [viewState, setViewState] = useState<ViewState>("form");
   const [result, setResult] = useState<AnalyzeMarketResponse | null>(null);
   const [currentSampleId, setCurrentSampleId] = useState<string | null>(null);
+  const [sampleFreshness, setSampleFreshness] = useState<
+    "active" | "retained" | null
+  >(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
   const accessKey = useSyncExternalStore(
@@ -62,6 +65,7 @@ export default function HomePage({
 
       setResult(json as AnalyzeMarketResponse);
       setCurrentSampleId(null);
+      setSampleFreshness(null);
       setViewState("results");
     } catch {
       setErrorMessage("Could not reach the analysis service. Please try again.");
@@ -102,6 +106,11 @@ export default function HomePage({
         reportId: json.reportId ?? json.report.reportId,
       });
       setCurrentSampleId(json.sampleId);
+      setSampleFreshness(
+        json.freshness === "retained" || json.freshness === "active"
+          ? json.freshness
+          : "active"
+      );
       setViewState("results");
     } catch {
       setErrorMessage(
@@ -114,6 +123,7 @@ export default function HomePage({
   function reset() {
     setResult(null);
     setErrorMessage(null);
+    setSampleFreshness(null);
     setViewState("form");
   }
 
@@ -272,7 +282,10 @@ export default function HomePage({
           {viewState === "results" && result ? (
             <div className="space-y-6">
               <ShareReport reportId={result.reportId} />
-              <ResultsDashboard data={result} />
+              <ResultsDashboard
+                data={result}
+                sampleFreshness={sampleFreshness}
+              />
             </div>
           ) : null}
         </div>

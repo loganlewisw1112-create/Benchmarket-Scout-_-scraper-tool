@@ -8,7 +8,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/api-guard", () => ({ enforceGuard: mocks.guard }));
-vi.mock("@/lib/sample-pool", () => ({ selectRandomActiveSample: mocks.select }));
+vi.mock("@/lib/sample-pool", () => ({
+  selectRandomActiveSample: mocks.select,
+  sampleFreshness: () => "active",
+}));
 vi.mock("@/lib/maintenance", () => ({
   isMaintenanceMode: () => mocks.maintenance,
   MAINTENANCE_RESPONSE: { code: "MAINTENANCE", error: "maintenance" },
@@ -45,11 +48,12 @@ describe("GET /api/sample-report", () => {
       sampleId: "sampleabc123",
       reportId: "reportabc123",
       generatedAt: "2026-07-19T12:00:00.000Z",
+      freshness: "active",
       report,
     });
   });
 
-  it("returns the typed 503 when no non-expired snapshot exists", async () => {
+  it("returns the typed 503 when no selectable snapshot exists", async () => {
     mocks.select.mockResolvedValue(null);
     const response = await GET(new Request("http://localhost/api/sample-report"));
     expect(response.status).toBe(503);

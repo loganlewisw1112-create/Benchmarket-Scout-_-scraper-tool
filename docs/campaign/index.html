@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Benchmark Scout — 14-day campaign assets</title>
+    <link rel="stylesheet" href="campaign.css" />
+    <style>
+      body { background: var(--slate-50); padding: 56px 40px 96px; }
+      .wrap { max-width: 1240px; margin: 0 auto; }
+      h1 { font-size: 40px; font-weight: 700; letter-spacing: -0.03em; color: var(--slate-900); }
+      .lede { font-size: 18px; color: var(--slate-600); max-width: 70ch; margin-top: 12px; line-height: 1.6; }
+      .warn {
+        margin: 28px 0 0; padding: 20px 24px; background: #fffbeb;
+        border: 1px solid #fde68a; border-radius: 14px;
+        font-size: 15px; color: #713f12; line-height: 1.6; max-width: 80ch;
+      }
+      .grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 32px; margin-top: 40px;
+      }
+      figure { margin: 0; }
+      figure img {
+        width: 100%; height: auto; display: block;
+        border: 1px solid var(--slate-200); border-radius: 12px;
+        box-shadow: 0 6px 20px -8px rgba(15,23,42,.16); background: #fff;
+      }
+      figcaption { margin-top: 12px; font-size: 14px; line-height: 1.5; color: var(--slate-600); }
+      figcaption b { color: var(--slate-900); font-weight: 600; display: block; font-size: 15px; }
+      .meta { color: var(--slate-400); font-size: 13px; }
+      .tag {
+        display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em;
+        text-transform: uppercase; padding: 3px 9px; border-radius: 999px; margin-top: 6px;
+      }
+      .tag--edit { background: #fef08a; color: #713f12; }
+      .tag--rev { background: var(--indigo-100); color: var(--indigo-700); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Benchmark Scout — 14-day campaign assets</h1>
+      <p class="lede">
+        Rendered from <code>card-dayNN.html</code> by <code>render.ps1</code>. To change any card,
+        edit its HTML and re-run the script — the PNG regenerates at exact platform size.
+      </p>
+
+      <p class="warn">
+        <b>Before posting:</b> Day 12 and Day 14 contain highlighted <b>NN</b> placeholders for
+        numbers that can only be known at post time (spots remaining, markets scouted). Replace
+        them in the HTML and re-render. They are deliberately styled to look unfinished so an
+        unedited card cannot go out by accident.
+      </p>
+
+      <div class="grid">
+        <figure><img src="out/day01-launch-1080x1350.png" alt="" /><figcaption><b>Day 1 — Launch / thesis</b>LI + X · CTA: Run your free report<span class="meta"><br />1080×1350</span></figcaption></figure>
+        <figure><img src="out/day02-demo-1080x1350.png" alt="" /><figcaption><b>Day 2 — Live demo</b>X + IG · CTA: Try it on your business<span class="meta"><br />1080×1350 · real report, /r/FQmMsIxR5Vc3</span></figcaption></figure>
+        <figure><img src="out/day03-agencies-1080x1350.png" alt="" /><figcaption><b>Day 3 — Problem-agitate</b>LinkedIn · CTA: Run one for a client<span class="meta"><br />1080×1350</span></figcaption></figure>
+        <figure><img src="out/day04-mythbust-1080x1350.png" alt="" /><figcaption><b>Day 4 — Myth-bust</b>X + IG · CTA: See a real one<span class="meta"><br />1080×1350</span></figcaption></figure>
+        <figure><img src="out/day05-leadgen-1080x1080.png" alt="" /><figcaption><b>Day 5 — Interactive lead-gen</b>X + LI · CTA: Comment below<span class="meta"><br />1080×1080</span></figcaption></figure>
+        <figure><img src="out/day06-whatyouget-1080x1350.png" alt="" /><figcaption><b>Day 6 — What you get</b>IG + FB · CTA: See a real one<span class="tag tag--rev">replaced</span><span class="meta"><br />1080×1350 · was a testimonial card</span></figcaption></figure>
+        <figure><img src="out/day07-founding100-1080x1350.png" alt="" /><figcaption><b>Day 7 — Founding 100 reveal</b>LI + X + IG · CTA: Claim a spot<span class="meta"><br />1080×1350</span></figcaption></figure>
+        <figure><img src="out/day08-buildinpublic-1080x1350.png" alt="" /><figcaption><b>Day 8 — Building in public</b>LI + X · CTA: Be part of the fix<span class="tag tag--rev">revised</span><span class="meta"><br />1080×1350 · NPS story removed</span></figcaption></figure>
+        <figure><img src="out/day09-recon-1080x1080.png" alt="" /><figcaption><b>Day 9 — Feature tease (Recon)</b>X + IG · CTA: Run one now<span class="meta"><br />1080×1080</span></figcaption></figure>
+        <figure><img src="out/day10-rerun-1080x1350.png" alt="" /><figcaption><b>Day 10 — Watch it change</b>IG + LI · CTA: Run yours<span class="meta"><br />1080×1350</span></figcaption></figure>
+        <figure><img src="out/day11-agency-1080x1350.png" alt="" /><figcaption><b>Day 11 — Agency angle</b>LinkedIn · CTA: Agencies → Founding 100<span class="tag tag--rev">revised</span><span class="meta"><br />1080×1350 · white-label claim removed</span></figcaption></figure>
+        <figure><img src="out/day12-urgency-1080x1920.png" alt="" /><figcaption><b>Day 12 — Urgency</b>X + IG Story · CTA: Claim yours<span class="tag tag--edit">edit before posting</span><span class="meta"><br />1080×1920</span></figcaption></figure>
+        <figure><img src="out/day13-feedback-1080x1350.png" alt="" /><figcaption><b>Day 13 — Feedback callout</b>LI + X + IG · CTA: Tell us what's missing<span class="meta"><br />1080×1350 · → /#feedback</span></figcaption></figure>
+        <figure><img src="out/day14-recap-1080x1350.png" alt="" /><figcaption><b>Day 14 — Recap / close</b>All · CTA: Last call<span class="tag tag--edit">edit before posting</span><span class="meta"><br />1080×1350</span></figcaption></figure>
+        <figure><img src="out/og-share-1200x630.png" alt="" /><figcaption><b>OG / Twitter share image</b>Flag 2 · for app/opengraph-image<span class="meta"><br />1200×630</span></figcaption></figure>
+      </div>
+    </div>
+  </body>
+</html>

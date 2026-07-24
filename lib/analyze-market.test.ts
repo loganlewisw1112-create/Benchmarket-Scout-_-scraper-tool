@@ -405,7 +405,7 @@ describe("analyzeMarket real-data-only orchestration", () => {
     );
   });
 
-  it("keeps the explicit worst-case network schedule below the 50s analysis ceiling", () => {
+  it("keeps the explicit worst-case network schedule below the analysis ceiling", () => {
     const auditEntities = 1 + MAX_AUDITED_COMPETITORS;
     const auditWaves = Math.ceil(
       auditEntities / ANALYSIS_TIMING_BUDGETS.auditConcurrency
@@ -416,7 +416,7 @@ describe("analyzeMarket real-data-only orchestration", () => {
       auditWaves * ANALYSIS_TIMING_BUDGETS.auditPerEntityMs +
       ANALYSIS_TIMING_BUDGETS.newsPerEntityMs;
 
-    expect(scheduledNetworkMs).toBe(40_500);
+    expect(scheduledNetworkMs).toBe(44_500);
     expect(
       ANALYSIS_TIMING_BUDGETS.overallMs - scheduledNetworkMs
     ).toBeGreaterThanOrEqual(9_000);

@@ -75,7 +75,7 @@ complete and partial reports.
 Refresh candidates sequentially through `POST /api/sample-report/refresh`
 using header `x-sample-refresh-secret` and body `{ "catalogId": "..." }`.
 Only snapshots passing the sample quality gate can become active: successful
-user audit, at least six real competitors, at least three successful
+user audit, at least four real competitors, at least two successful
 competitor audits, complete source resolution, and zero provenance violations.
 
 Before launch, require exactly 12 active distinct-industry snapshots. Confirm
