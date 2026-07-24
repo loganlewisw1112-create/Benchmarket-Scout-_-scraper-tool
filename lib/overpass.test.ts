@@ -1,4 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("./time-budget", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./time-budget")>();
+  return {
+    ...actual,
+    abortableDelay: vi.fn(async () => undefined),
+  };
+});
+
 import {
   OSM_CATEGORY_MAP,
   queryOverpass,
@@ -39,6 +48,8 @@ describe("queryOverpass", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response("", false, 504))
+      .mockResolvedValueOnce(response("", false, 504))
+      .mockResolvedValueOnce(response("", false, 504))
       .mockResolvedValue(response(JSON.stringify({ elements })));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -49,9 +60,9 @@ describe("queryOverpass", () => {
       "https://overpass.private.coffee/api/interpreter"
     );
     expect(Number.isNaN(Date.parse(result.accessedAt))).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1][0]).toBe("https://overpass.private.coffee/api/interpreter");
-  }, 5000);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[3][0]).toBe("https://overpass.private.coffee/api/interpreter");
+  });
 
   it("throws after exhausting all endpoints and attempts", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response("", false, 500));
@@ -62,8 +73,8 @@ describe("queryOverpass", () => {
       status: 503,
       source: "overpass",
     } satisfies Partial<SourceUnavailableError>);
-    expect(fetchMock).toHaveBeenCalledTimes(2); // 2 endpoints x 1 attempt
-  }, 8000);
+    expect(fetchMock).toHaveBeenCalledTimes(6); // 2 endpoints x 3 attempts
+  });
 
   it("treats a non-JSON response as a failure and retries", async () => {
     const fetchMock = vi
@@ -75,7 +86,7 @@ describe("queryOverpass", () => {
     const result = await queryOverpass("dentist", 30, -97);
     expect(result).toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-  }, 3000);
+  });
 
   it("includes one clause per resolved tag pair in the query", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response(JSON.stringify({ elements: [] })));
@@ -85,8 +96,8 @@ describe("queryOverpass", () => {
 
     const body = fetchMock.mock.calls[0][1].body as string;
     const query = decodeURIComponent(body.replace(/^data=/, ""));
-    expect(query).toContain(`nwr["amenity"="dentist"](around:12000,41.88,-87.63);`);
-    expect(query).toContain(`nwr["healthcare"="dentist"](around:12000,41.88,-87.63);`);
+    expect(query).toContain(`nwr["amenity"="dentist"](around:18000,41.88,-87.63);`);
+    expect(query).toContain(`nwr["healthcare"="dentist"](around:18000,41.88,-87.63);`);
   });
 
   it("honest floor: never fires a network request when nothing resolves", async () => {
@@ -117,7 +128,7 @@ describe("queryOverpass", () => {
 
     await expect(queryOverpass("dentist", 30, -97)).resolves.toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-  }, 3000);
+  });
 
   it("raises SOURCE_UNAVAILABLE after malformed payload retries are exhausted", async () => {
     const fetchMock = vi
@@ -130,8 +141,8 @@ describe("queryOverpass", () => {
       status: 503,
       source: "overpass",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  }, 8000);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
 
   it("honors an already-canceled parent budget with typed SOURCE_UNAVAILABLE", async () => {
     const controller = new AbortController();

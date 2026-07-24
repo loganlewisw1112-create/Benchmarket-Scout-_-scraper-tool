@@ -1,0 +1,301 @@
+/* Benchmark Scout — campaign card design system
+ *
+ * Brand tokens mirror the live app (Tailwind indigo/slate + Geist).
+ * Every card is a fixed-size .frame so screenshots export at exact
+ * platform dimensions with no scaling.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&display=swap");
+
+:root {
+  --indigo-600: #4f46e5;
+  --indigo-700: #4338ca;
+  --indigo-100: #e0e7ff;
+
+  --slate-900: #0f172a;
+  --slate-600: #475569;
+  --slate-400: #94a3b8;
+  --slate-200: #e2e8f0;
+  --slate-50: #f8fafc;
+
+  --font: "Geist", "Inter", "Helvetica Neue", Arial, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  background: #64748b;
+}
+
+/* ---- Frames -------------------------------------------------------- */
+
+.frame {
+  background: var(--slate-50);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.frame--portrait { width: 1080px; height: 1350px; }  /* LinkedIn / IG feed */
+.frame--square   { width: 1080px; height: 1080px; }  /* X / Facebook */
+.frame--story    { width: 1080px; height: 1920px; }  /* Stories / Reels */
+.frame--og       { width: 1200px; height: 630px;  }  /* OG / Twitter card */
+
+/* ---- The card ------------------------------------------------------ */
+
+.card {
+  flex: 1;
+  margin: 56px;
+  padding: 72px;
+  background: #fff;
+  border: 1px solid var(--slate-200);
+  border-radius: 32px;
+  box-shadow: 0 12px 40px -12px rgba(15, 23, 42, 0.12);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Wordmark lockup ----------------------------------------------- */
+
+.lockup {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.wordmark {
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: var(--slate-900);
+}
+
+.pill {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--indigo-700);
+  background: var(--indigo-100);
+  border-radius: 999px;
+  padding: 6px 16px 7px;
+  line-height: 1;
+}
+
+/* ---- Type ---------------------------------------------------------- */
+
+.headline {
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+  color: var(--slate-900);
+  text-wrap: balance;
+}
+
+.headline--xl { font-size: 84px; }
+.headline--lg { font-size: 64px; }
+
+.sub {
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--slate-600);
+}
+
+.rule {
+  width: 88px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--indigo-600);
+}
+
+/* ---- Comparison columns -------------------------------------------- */
+
+.cols {
+  display: grid;
+  /* right column is wider — it carries the longer, credible source names */
+  grid-template-columns: 1fr 1px 1.5fr;
+  gap: 40px;
+  align-items: start;
+}
+
+.cols__divider {
+  align-self: stretch;
+  background: var(--slate-200);
+}
+
+.col__label {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  margin-bottom: 28px;
+}
+
+.col__label--muted { color: var(--slate-400); }
+.col__label--brand { color: var(--indigo-700); }
+
+.col__list { list-style: none; }
+
+.col__list li {
+  font-size: 28px;
+  line-height: 1.5;
+  padding: 9px 0;
+  text-wrap: nowrap;
+}
+
+.col__list--muted li {
+  color: var(--slate-400);
+  font-weight: 400;
+}
+
+.col__list--brand li {
+  color: var(--slate-900);
+  font-weight: 500;
+}
+
+/* ---- CTA ----------------------------------------------------------- */
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  background: var(--indigo-600);
+  color: #fff;
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  padding: 26px 48px;
+  border-radius: 16px;
+}
+
+.url {
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--slate-400);
+  letter-spacing: -0.005em;
+}
+
+/* ---- Spacing helpers ----------------------------------------------- */
+
+.grow { flex: 1; }
+.stack-sm > * + * { margin-top: 24px; }
+.stack-md > * + * { margin-top: 40px; }
+.foot {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* ---- Kicker -------------------------------------------------------- */
+
+.kicker {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--indigo-700);
+}
+
+/* ---- Product screenshot inset -------------------------------------- */
+
+.shot {
+  border: 1px solid var(--slate-200);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 8px 28px -10px rgba(15, 23, 42, 0.18);
+  line-height: 0;
+}
+
+.shot img { width: 100%; height: auto; display: block; }
+
+.shot__cap {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--slate-400);
+  line-height: 1.4;
+  margin-top: 18px;
+}
+
+/* ---- Plain item list (no comparison) -------------------------------- */
+
+.items { list-style: none; }
+
+.items li {
+  font-size: 34px;
+  font-weight: 600;
+  color: var(--slate-900);
+  line-height: 1.35;
+  padding: 16px 0 16px 36px;
+  position: relative;
+}
+
+.items li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 30px;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--indigo-600);
+}
+
+.items--sm li { font-size: 29px; font-weight: 500; padding: 11px 0 11px 32px; }
+.items--sm li::before { top: 24px; width: 11px; height: 11px; }
+
+/* ---- Caveat / roadmap note ------------------------------------------ */
+
+.note {
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--slate-400);
+  border-left: 4px solid var(--slate-200);
+  padding-left: 24px;
+}
+
+/* ---- Big number (countdown / recap) --------------------------------- */
+
+.bignum {
+  font-size: 340px;
+  font-weight: 800;
+  letter-spacing: -0.055em;
+  line-height: 0.82;
+  color: var(--indigo-600);
+}
+
+.bignum__unit {
+  font-size: 44px;
+  font-weight: 600;
+  color: var(--slate-900);
+  letter-spacing: -0.02em;
+}
+
+/* Placeholder digits the user swaps before posting. Deliberately styled
+   so an unedited card is obviously unfinished and can't ship by accident. */
+.ph {
+  display: inline-block;
+  background: #fef08a;
+  color: var(--slate-900);
+  border-radius: 0.06em;
+  /* em-based so the highlight hugs the digits at any type size, instead of
+     inheriting the huge line-box of .bignum and swallowing nearby text */
+  line-height: 0.86;
+  padding: 0.08em 0.1em;
+}
+
+/* ---- Story format (1080x1920) --------------------------------------- */
+
+.frame--story .card { margin: 64px; padding: 88px; border-radius: 40px; }
+
+/* ---- OG / share card (1200x630) ------------------------------------- */
+
+.frame--og .card { margin: 0; padding: 72px; border-radius: 0; border: none; box-shadow: none; }
+.frame--og .headline { font-size: 62px; }
+.frame--og .sub { font-size: 27px; }

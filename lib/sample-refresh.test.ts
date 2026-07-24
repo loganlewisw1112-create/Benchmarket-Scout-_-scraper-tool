@@ -28,7 +28,7 @@ function competitor(index: number, successful: boolean): CompetitorReport {
   } as CompetitorReport;
 }
 
-function gateReport(realCount = 6, successfulCount = 3): AnalyzeMarketResponse {
+function gateReport(realCount = 4, successfulCount = 2): AnalyzeMarketResponse {
   return {
     schemaVersion: 2,
     user: {
@@ -83,7 +83,7 @@ describe("strict real-sample refresh gate", () => {
 
   it("retains the last good snapshot when any quality gate fails", async () => {
     const dependencies: SampleRefreshDependencies = {
-      analyze: vi.fn(async () => gateReport(5, 2)),
+      analyze: vi.fn(async () => gateReport(3, 1)),
       clearCache: vi.fn(async () => undefined),
       persistReport: vi.fn(async () => "reportabc123"),
       replaceSnapshot: vi.fn(async () => undefined),
@@ -95,5 +95,20 @@ describe("strict real-sample refresh gate", () => {
     ).rejects.toBeInstanceOf(SampleRefreshQualityError);
     expect(dependencies.persistReport).not.toHaveBeenCalled();
     expect(dependencies.replaceSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("accepts four real competitors with two successful audits", async () => {
+    const report = gateReport(4, 2);
+    const dependencies: SampleRefreshDependencies = {
+      analyze: vi.fn(async () => report),
+      clearCache: vi.fn(async () => undefined),
+      persistReport: vi.fn(async () => "reportabc123"),
+      replaceSnapshot: vi.fn(async () => undefined),
+      now: () => new Date("2026-07-19T12:00:00.000Z"),
+      sampleId: () => "sampleabc123",
+    };
+    await expect(
+      refreshRealSample("bakery-firebrand-bread", dependencies)
+    ).resolves.toMatchObject({ catalogId: "bakery-firebrand-bread" });
   });
 });

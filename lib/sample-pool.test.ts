@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   activeSnapshotsFromReads,
   SAMPLE_MAX_AGE_MS,
+  sampleFreshness,
   samplePoolHealthFromReads,
+  selectableSnapshotsFromReads,
 } from "./sample-pool";
 import type { CatalogSampleRead, SampleSnapshotV2 } from "./store";
 import type { AnalyzeMarketResponse } from "./types";
@@ -83,5 +85,38 @@ describe("real sample pool", () => {
       alert: true,
       alertReasons: ["OLDEST_SAMPLE_TOO_OLD"],
     });
+  });
+
+  it("falls back to freshest retained snapshots when the active pool is empty", () => {
+    const reads = [
+      readAtAge("stale-newer", 80),
+      readAtAge("stale-older", 100),
+      { catalogId: "broken", outcome: { status: "missing" as const } },
+    ];
+    expect(activeSnapshotsFromReads(reads, NOW)).toHaveLength(0);
+    expect(selectableSnapshotsFromReads(reads, NOW).map((item) => item.catalogId)).toEqual([
+      "stale-newer",
+      "stale-older",
+    ]);
+  });
+
+  it("prefers active snapshots over retained stale ones when both exist", () => {
+    const reads = [readAtAge("fresh", 4), readAtAge("stale", 90)];
+    expect(selectableSnapshotsFromReads(reads, NOW).map((item) => item.catalogId)).toEqual([
+      "fresh",
+    ]);
+  });
+
+  it("labels freshness as active or retained by age", () => {
+    const active = readAtAge("fresh", 4).outcome;
+    const retained = readAtAge("stale", 90).outcome;
+    expect(active.status).toBe("ok");
+    expect(retained.status).toBe("ok");
+    if (active.status === "ok") {
+      expect(sampleFreshness(active.value, NOW)).toBe("active");
+    }
+    if (retained.status === "ok") {
+      expect(sampleFreshness(retained.value, NOW)).toBe("retained");
+    }
   });
 });

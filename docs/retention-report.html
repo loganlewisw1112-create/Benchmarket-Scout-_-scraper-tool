@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body><title>Benchmark Scout — The Retention Report</title>
+<style>
+  :root {
+    --paper:#EEF1EF; --surface:#FFFFFF; --surface-2:#E6EBE8;
+    --ink:#10201C; --ink-2:#3B4A44; --ink-3:#697A73;
+    --line:#D5DDD8; --line-2:#E4E9E6;
+    --accent:#15654F; --accent-soft:#DCEAE3;
+    --brass:#8C6416; --brass-soft:#F0E7D2;
+    --pos:#2E8B6F; --neu:#93A29C; --neg:#B84E38;
+    --shadow: 0 1px 2px rgba(16,32,28,.05), 0 10px 28px rgba(16,32,28,.06);
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", "Consolas", "Liberation Mono", monospace;
+    --sans: -apple-system, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#0D1513; --surface:#131E1B; --surface-2:#18241F;
+      --ink:#E9F0ED; --ink-2:#AEBCB7; --ink-3:#7E8D88;
+      --line:#263531; --line-2:#1E2C28;
+      --accent:#54C2A5; --accent-soft:#173029;
+      --brass:#D6A24E; --brass-soft:#2A2213;
+      --pos:#59C091; --neu:#8C9A94; --neg:#E0806A;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px rgba(0,0,0,.38);
+    }
+  }
+  :root[data-theme="light"] {
+    --paper:#EEF1EF; --surface:#FFFFFF; --surface-2:#E6EBE8;
+    --ink:#10201C; --ink-2:#3B4A44; --ink-3:#697A73;
+    --line:#D5DDD8; --line-2:#E4E9E6;
+    --accent:#15654F; --accent-soft:#DCEAE3;
+    --brass:#8C6416; --brass-soft:#F0E7D2;
+    --pos:#2E8B6F; --neu:#93A29C; --neg:#B84E38;
+    --shadow: 0 1px 2px rgba(16,32,28,.05), 0 10px 28px rgba(16,32,28,.06);
+  }
+  :root[data-theme="dark"] {
+    --paper:#0D1513; --surface:#131E1B; --surface-2:#18241F;
+    --ink:#E9F0ED; --ink-2:#AEBCB7; --ink-3:#7E8D88;
+    --line:#263531; --line-2:#1E2C28;
+    --accent:#54C2A5; --accent-soft:#173029;
+    --brass:#D6A24E; --brass-soft:#2A2213;
+    --pos:#59C091; --neu:#8C9A94; --neg:#E0806A;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px rgba(0,0,0,.38);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { background: var(--paper); }
+  body {
+    margin: 0; color: var(--ink); font-family: var(--sans);
+    font-size: 16.5px; line-height: 1.62; -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  .page { max-width: 1020px; margin: 0 auto; padding: 0 24px 104px; }
+
+  /* ---------- type ---------- */
+  h1, h2, h3 { text-wrap: balance; letter-spacing: -.01em; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--accent); font-weight: 600;
+    display: flex; align-items: center; gap: .7rem; margin: 0 0 14px;
+  }
+  .eyebrow::before { content:""; width: 22px; height: 1px; background: var(--accent); opacity:.55; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  p { margin: 0 0 15px; max-width: 68ch; }
+  a { color: var(--accent); }
+
+  /* ---------- masthead ---------- */
+  .masthead { border-bottom: 2px solid var(--ink); margin-top: 44px; padding-bottom: 26px; }
+  .mast-strip {
+    display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: baseline;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--ink-3);
+  }
+  .mast-strip b { color: var(--ink-2); font-weight: 600; }
+  .mast-eyebrow {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--accent); font-weight: 600; margin: 26px 0 14px;
+  }
+  .mast-title {
+    font-family: var(--serif); font-weight: 600; letter-spacing: -.015em;
+    font-size: clamp(2.1rem, 5.6vw, 3.35rem); line-height: 1.06; margin: 0 0 18px;
+  }
+  .mast-title .accent { color: var(--accent); font-style: italic; }
+  .mast-sub { font-size: 1.12rem; color: var(--ink-2); max-width: 60ch; margin: 0; }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 62px; }
+  .sec-head { display: flex; align-items: baseline; gap: 15px; margin-bottom: 8px; }
+  .sec-idx { font-family: var(--mono); font-size: 12.5px; color: var(--brass); font-weight: 700; letter-spacing: .05em; }
+  h2 { font-family: var(--serif); font-weight: 600; font-size: clamp(1.5rem, 3.3vw, 2.05rem); margin: 0; line-height: 1.12; }
+  .sec-lede { color: var(--ink-2); font-size: 1.06rem; margin: 12px 0 24px; max-width: 74ch; }
+
+  /* ---------- cards / grid ---------- */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px; box-shadow: var(--shadow); }
+  .grid { display: grid; gap: 16px; }
+  .g2 { grid-template-columns: repeat(2, 1fr); }
+  .g3 { grid-template-columns: repeat(3, 1fr); }
+  .g4 { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 760px){ .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+  /* ---------- KPI ---------- */
+  .kpi { background: var(--surface); border:1px solid var(--line); border-radius:12px; padding:19px 18px 16px; box-shadow: var(--shadow); }
+  .kpi .num { font-family: var(--mono); font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height:1; font-variant-numeric: tabular-nums; }
+  .kpi .num.acc { color: var(--accent); }
+  .kpi .num.neg { color: var(--neg); }
+  .kpi .num.brass { color: var(--brass); }
+  .kpi .lab { margin-top: 11px; font-size: 13.5px; color: var(--ink-2); line-height:1.42; }
+  .kpi .lab b { color: var(--ink); }
+
+  /* ---------- bars ---------- */
+  .bars { display: flex; flex-direction: column; gap: 9px; }
+  .bar-row { display: grid; grid-template-columns: 172px 1fr 48px; align-items: center; gap: 12px; }
+  .bar-lab { font-size: 13px; color: var(--ink-2); }
+  .bar-track { background: var(--surface-2); border-radius: 5px; height: 16px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 5px; background: var(--accent); }
+  .bar-fill.brass { background: var(--brass); }
+  .bar-val { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; }
+  @media (max-width:560px){ .bar-row { grid-template-columns: 118px 1fr 42px; } }
+
+  /* stacked sentiment */
+  .stack { display:flex; height: 42px; border-radius: 8px; overflow:hidden; border:1px solid var(--line); }
+  .stack > div { display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:12px; color:#fff; font-weight:600; }
+  .legend { display:flex; flex-wrap:wrap; gap:14px 18px; margin-top:13px; font-size:12.5px; color:var(--ink-2); }
+  .legend span { display:inline-flex; align-items:center; gap:7px; }
+  .dot { width:11px; height:11px; border-radius:3px; display:inline-block; flex:none; }
+
+  /* ---------- callouts ---------- */
+  .callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 17px 19px; border-radius: 0 10px 10px 0; }
+  .callout.brass { border-color: var(--brass); background: var(--brass-soft); }
+  .callout p { margin: 0; max-width: none; }
+  .callout .k { font-family: var(--mono); font-size: 11px; letter-spacing:.12em; text-transform:uppercase; color: var(--accent); font-weight:700; display:block; margin-bottom:7px; }
+  .callout.brass .k { color: var(--brass); }
+
+  /* ---------- doctrine (from the shelf) ---------- */
+  .doctrine {
+    background: var(--surface); border:1px solid var(--line);
+    border-left: 3px solid var(--brass); border-radius: 0 10px 10px 0;
+    padding: 16px 19px; box-shadow: var(--shadow);
+  }
+  .doctrine .tag {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--brass); font-weight: 700; display:flex; flex-wrap:wrap; gap: 4px 10px; align-items:baseline; margin-bottom: 8px;
+  }
+  .doctrine .tag .bk { color: var(--ink-2); }
+  .doctrine p { margin: 0; font-size: 14.5px; color: var(--ink-2); max-width: none; }
+  .doctrine p b { color: var(--ink); }
+
+  /* ---------- hook loop ---------- */
+  .loop { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 760px){ .loop { grid-template-columns: repeat(2,1fr); } }
+  @media (max-width: 440px){ .loop { grid-template-columns: 1fr; } }
+  .node { background: var(--surface); border:1px solid var(--line); border-radius:11px; padding:16px 15px; box-shadow: var(--shadow); position: relative; }
+  .node .step { font-family: var(--mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color: var(--brass); font-weight:700; }
+  .node h4 { font-family: var(--serif); font-weight: 600; font-size: 1.05rem; margin: 6px 0 6px; letter-spacing:-.01em; }
+  .node p { margin:0; font-size:12.8px; color: var(--ink-2); max-width:none; line-height:1.45; }
+  .node .feat { margin-top:10px; font-family:var(--mono); font-size:11px; color: var(--accent); letter-spacing:.02em; }
+
+  /* ---------- tiers ---------- */
+  .tiers { display:grid; grid-template-columns: repeat(4,1fr); gap:14px; }
+  @media (max-width: 860px){ .tiers { grid-template-columns: repeat(2,1fr);} }
+  @media (max-width: 520px){ .tiers { grid-template-columns: 1fr;} }
+  .tier { background: var(--surface); border:1px solid var(--line); border-radius:12px; padding:20px 18px; display:flex; flex-direction:column; box-shadow: var(--shadow); }
+  .tier.flag { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+  .tier .flagtag { font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); font-weight:700; margin-bottom:8px; }
+  .tier h3 { margin:0; font-family: var(--serif); font-size:1.35rem; font-weight:600; letter-spacing:-.01em; }
+  .tier .code { font-family:var(--mono); font-size:11px; color:var(--ink-3); letter-spacing:.08em; text-transform:uppercase; }
+  .tier .price { font-family:var(--mono); font-size:30px; font-weight:700; margin:12px 0 2px; letter-spacing:-.02em; }
+  .tier .price small { font-size:13px; color:var(--ink-3); font-weight:500; }
+  .tier .who { font-size:12.5px; color:var(--ink-2); min-height: 40px; margin-bottom:12px; }
+  .tier ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; font-size:13.5px; color:var(--ink-2); }
+  .tier li { padding-left:18px; position:relative; line-height:1.4; }
+  .tier li::before { content:"›"; position:absolute; left:0; color:var(--accent); font-weight:700; }
+  .tier .target { margin-top:14px; padding-top:12px; border-top:1px solid var(--line-2); font-family:var(--mono); font-size:11px; color:var(--brass); letter-spacing:.02em; }
+
+  /* ---------- phases ---------- */
+  .phase { display:grid; grid-template-columns: 64px 1fr; gap:18px; padding:20px 0; border-top:1px solid var(--line); }
+  .phase:last-of-type { border-bottom:1px solid var(--line); }
+  .phase .pn { font-family:var(--mono); font-size:13px; font-weight:700; color:var(--brass); letter-spacing:.04em; }
+  .phase h3 { margin:0 0 4px; font-family: var(--serif); font-size:1.2rem; font-weight:600; letter-spacing:-.01em; }
+  .phase .tag { display:inline-block; font-family:var(--mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--accent); background:var(--accent-soft); padding:2px 9px; border-radius:20px; margin-left:8px; vertical-align:middle; }
+  .phase .ship { font-family:var(--mono); font-size:11.5px; color:var(--ink-3); margin-top:9px; }
+  .phase p { margin:6px 0 0; font-size:14.5px; }
+
+  /* ---------- table ---------- */
+  .tw { overflow-x:auto; border:1px solid var(--line); border-radius:12px; }
+  table { border-collapse: collapse; width:100%; min-width: 520px; background:var(--surface); }
+  th, td { text-align:left; padding:12px 14px; font-size:13.5px; border-bottom:1px solid var(--line-2); }
+  th { font-family:var(--mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-3); background:var(--surface-2); }
+  td.num, th.num { text-align:right; font-family:var(--mono); font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom:none; }
+
+  /* ---------- demand svg ---------- */
+  .demand { width:100%; height:auto; display:block; }
+  .demand text { font-family: var(--mono); fill: var(--ink-3); font-size: 11px; }
+  .demand .axis { stroke: var(--line); stroke-width:1; }
+  .demand .area { fill: var(--accent); opacity:.12; }
+  .demand .line { fill:none; stroke: var(--accent); stroke-width:2.5; }
+  .demand .pt { fill: var(--surface); stroke: var(--accent); stroke-width:2.5; }
+  .demand .plab { fill: var(--ink); font-weight:600; }
+
+  /* ---------- ICP cols ---------- */
+  .icp { display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  @media (max-width:620px){ .icp { grid-template-columns: 1fr; } }
+  .icp .panel { background: var(--surface); border:1px solid var(--line); border-radius:12px; padding:18px 19px; box-shadow: var(--shadow); }
+  .icp h3 { font-family: var(--mono); font-size: 11.5px; letter-spacing:.1em; text-transform:uppercase; color: var(--ink-2); margin:0 0 13px; }
+  .icp ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:9px; }
+  .icp li { position:relative; padding-left:22px; font-size:14px; line-height:1.45; color: var(--ink-2); }
+  .icp li::before { position:absolute; left:0; top:0; font-family:var(--mono); font-weight:700; }
+  .icp .fit li::before { content:"+"; color: var(--accent); }
+  .icp .skip li::before { content:"\2013"; color: var(--neg); }
+  .find { margin-top:14px; padding:14px 18px; border:1px dashed var(--line); border-radius:10px; font-size:14px; color: var(--ink-2); }
+  .find b { font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); display:block; margin-bottom:6px; }
+
+  /* ---------- email ---------- */
+  .email { border:1px solid var(--line); border-radius:12px; overflow:hidden; background: var(--surface); box-shadow: var(--shadow); }
+  .email + .email { margin-top:14px; }
+  .email-tag { font-family:var(--mono); font-size:10.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink-2); background:var(--accent-soft); padding:9px 16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:1rem; }
+  .email-tag span:last-child { color:var(--ink-3); }
+  .email-body { padding:16px 18px; }
+  .subject { font-size:14.5px; margin:0 0 12px; padding-bottom:12px; border-bottom:1px solid var(--line-2); }
+  .subject i { font-style:normal; color:var(--ink-3); font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; margin-right:8px; }
+  .email-copy p { margin:0 0 10px; font-size:14.5px; max-width:none; }
+  .ph { color:var(--accent); font-weight:600; }
+  .note { font-size:13px; color:var(--ink-3); font-style:italic; margin:8px 0 0; padding-left:12px; border-left:2px solid var(--line); max-width:none; }
+
+  /* ---------- metrics ---------- */
+  .metrics { display:flex; flex-direction:column; border-top:1px solid var(--line); }
+  .metric { display:flex; gap:18px; padding:15px 0; border-bottom:1px solid var(--line); align-items:baseline; }
+  .metric .num { font-family:var(--mono); font-weight:700; color:var(--accent); font-size:15px; min-width:100px; flex:none; }
+  .metric .txt { font-size:14.5px; color:var(--ink-2); max-width:none; margin:0; }
+  .metric .txt b { color: var(--ink); }
+
+  /* ---------- steps ---------- */
+  .steps { list-style:none; counter-reset:s; margin:0; padding:0; display:flex; flex-direction:column; gap:13px; }
+  .steps li { counter-increment:s; position:relative; padding-left:44px; font-size:14.5px; color:var(--ink-2); }
+  .steps li::before {
+    content: counter(s, decimal-leading-zero); position:absolute; left:0; top:-2px;
+    font-family:var(--mono); font-size:12px; font-weight:700; color:var(--accent);
+    border:1px solid var(--line); border-radius:6px; width:30px; height:30px;
+    display:flex; align-items:center; justify-content:center; background: var(--surface);
+  }
+  .steps b { color: var(--ink); font-weight:600; }
+
+  /* ---------- shelf ---------- */
+  .shelf { display:flex; flex-direction:column; border-top:1px solid var(--line); }
+  .book { display:grid; grid-template-columns: 220px 1fr; gap:18px; padding:16px 0; border-bottom:1px solid var(--line); }
+  @media (max-width:620px){ .book { grid-template-columns: 1fr; gap:6px; } }
+  .book .ttl { font-weight:600; color:var(--ink); font-size:14.5px; }
+  .book .ttl small { display:block; font-family:var(--mono); font-size:11px; color:var(--ink-3); font-weight:400; letter-spacing:.03em; margin-top:2px; }
+  .book .use { font-size:14px; color:var(--ink-2); max-width:none; margin:0; }
+  .book .use b { color: var(--ink); }
+
+  .foot { margin-top:72px; padding-top:22px; border-top:2px solid var(--ink); font-family:var(--mono); font-size:11px; color:var(--ink-3); letter-spacing:.04em; line-height:1.75; }
+  .foot b { color: var(--ink-2); }
+</style>
+
+<div class="page">
+
+  <!-- ============ MASTHEAD ============ -->
+  <header class="masthead">
+    <div class="mast-strip">
+      <span>Benchmark&nbsp;Scout</span>
+      <span><b>Post-launch field brief</b></span>
+      <span>Dataset&nbsp;<b>n=1,000 (simulated)</b></span>
+      <span>Window&nbsp;<b>05&nbsp;Jun&nbsp;–&nbsp;20&nbsp;Jul&nbsp;2026</b></span>
+      <span>Status&nbsp;<b>Live · open beta</b></span>
+    </div>
+    <p class="mast-eyebrow">The retention report — one problem, and the plan to kill it</p>
+    <h1 class="mast-title">A great report is the easiest thing in the world to use <span class="accent">once and forget.</span></h1>
+    <p class="mast-sub">Benchmark Scout won the first click and lost the second. 1,000 simulated field reports say it a dozen ways: the report dazzles once, then dies. This brief fuses that evidence with the plan to force a second visit — the product loop, the price, and the exact people to sell it to — pressure-tested against the operators who already solved retention. One question decides everything: <b style="color:var(--ink)">do accounts come back next month.</b></p>
+  </header>
+
+  <!-- ============ VERDICT ============ -->
+  <section aria-label="The verdict">
+    <div class="grid g4">
+      <div class="kpi"><div class="num neg">−21.6</div><div class="lab">Net Promoter Score. A good <em>first</em> impression with no reason to return — <b>41% detractors.</b></div></div>
+      <div class="kpi"><div class="num acc">69%</div><div class="lab">want <b>recurring updates</b>, not a one-time snapshot. The single loudest signal in the corpus.</div></div>
+      <div class="kpi"><div class="num brass">80%</div><div class="lab">would pay <em>something</em> monthly. Median payer <b>$19</b>, blended ARPU <b>≈$38</b>.</div></div>
+      <div class="kpi"><div class="num">66%</div><div class="lab">land <b>“behind but recoverable”</b> or “low visibility” — a built-in reason to act, then watch.</div></div>
+    </div>
+    <div class="callout" style="margin-top:16px">
+      <span class="k">The one-line read</span>
+      <p>The first report is excellent. There is no second one — no monitoring, no alert, no account — so the tool reads as one-and-done, and that single gap <em>is</em> the entire −21.6. Do not add features to the report. Turn the report into a <b>monitored, alerting, account-based subscription</b>, then aim every ounce of acquisition at the one audience that needs it monthly. The money is already on the table; you just haven't given anyone a reason to come back and spend it.</p>
+    </div>
+  </section>
+
+  <!-- ============ §01 THE PROBLEM ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§01</span><h2>The one problem worth solving</h2></div>
+    <p class="sec-lede">A personalized competitor report is the best cold-open you can send and the fastest thing on earth to abandon. Stop reading the symptoms as separate problems. The negative NPS, the “useful once” quotes, the flat sentiment — one disease, one diagnosis: acquisition works, the bucket leaks, and you are paying to fill a bucket that empties itself.</p>
+    <p>The product is not broken — it turns a stranger into “huh, that's actually useful” in thirty seconds flat. It is missing exactly one thing: a second visit. So the fix is not a longer roadmap; it is a single, non-negotiable move — <b>install a reason to return before you spend another dollar on acquisition.</b> Retention is not one metric among many here. It is the entire business, and it is the lens every section below is written through. Everything that does not create a second visit is a distraction until this is solved.</p>
+    <div class="doctrine" style="margin-top:6px">
+      <div class="tag"><span>From the shelf</span><span class="bk">The Lean Startup · Eric Ries</span></div>
+      <p>Ries separates the <b>“sticky” engine of growth</b> — where you win by keeping users faster than you lose them — from the vanity of raw signups. A tool with no return visit runs the paid engine on a leaky tank. The only number that proves an engine is turning is <b>cohort retention: does the group who ran a report in Week 0 run another in Week 4.</b> That is our north star; every feature and email below is judged against it.</p>
+    </div>
+  </section>
+
+  <!-- ============ §02 WHO / BEACHHEAD ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§02</span><h2>Who ran it — and who to actually chase</h2></div>
+    <p class="sec-lede">Overwhelmingly local home &amp; professional-service SMBs — the exact niche the real-only OSM/website pipeline serves. Owners run it themselves, and here is the trap: the owner needs this report <em>twice a year</em>. The agency rebuilds it <em>every month, by hand, for every client.</em> Sell to the owner and you are farming churn. Sell to the agency and you are selling a chore they'd kill to delete. That gap is the whole go-to-market.</p>
+    <div class="grid g2">
+      <div class="card">
+        <div class="eyebrow">Top business types</div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-lab">Plumber</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="bar-val">51</span></div>
+          <div class="bar-row"><span class="bar-lab">Electrician</span><span class="bar-track"><span class="bar-fill" style="width:82%"></span></span><span class="bar-val">42</span></div>
+          <div class="bar-row"><span class="bar-lab">HVAC</span><span class="bar-track"><span class="bar-fill" style="width:73%"></span></span><span class="bar-val">37</span></div>
+          <div class="bar-row"><span class="bar-lab">Hair salon</span><span class="bar-track"><span class="bar-fill" style="width:71%"></span></span><span class="bar-val">36</span></div>
+          <div class="bar-row"><span class="bar-lab">Cleaning / Landscaping</span><span class="bar-track"><span class="bar-fill" style="width:67%"></span></span><span class="bar-val">34</span></div>
+          <div class="bar-row"><span class="bar-lab">Accounting</span><span class="bar-track"><span class="bar-fill" style="width:59%"></span></span><span class="bar-val">30</span></div>
+          <div class="bar-row"><span class="bar-lab">Law firm</span><span class="bar-track"><span class="bar-fill" style="width:53%"></span></span><span class="bar-val">27</span></div>
+          <div class="bar-row"><span class="bar-lab">Real estate / Dentist</span><span class="bar-track"><span class="bar-fill" style="width:49%"></span></span><span class="bar-val">~25</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="eyebrow">Who's at the keyboard</div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-lab">Owner / operator</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="bar-val">56%</span></div>
+          <div class="bar-row"><span class="bar-lab">Office manager</span><span class="bar-track"><span class="bar-fill" style="width:20%"></span></span><span class="bar-val">11%</span></div>
+          <div class="bar-row"><span class="bar-lab">Agency (for a client)</span><span class="bar-track"><span class="bar-fill brass" style="width:20%"></span></span><span class="bar-val">11%</span></div>
+          <div class="bar-row"><span class="bar-lab">Marketing manager</span><span class="bar-track"><span class="bar-fill" style="width:18%"></span></span><span class="bar-val">10%</span></div>
+          <div class="bar-row"><span class="bar-lab">Franchise / multi-loc</span><span class="bar-track"><span class="bar-fill brass" style="width:11%"></span></span><span class="bar-val">6%</span></div>
+        </div>
+        <p style="margin-top:15px; font-size:13px; color:var(--ink-3)">Concentrated in metros — Austin, Phoenix, Denver, Seattle, Houston, Atlanta lead. Brass bars mark the two segments that rebuild reports on a schedule and anchor the higher tiers.</p>
+      </div>
+    </div>
+    <div class="doctrine" style="margin-top:16px">
+      <div class="tag"><span>From the shelf</span><span class="bk">Crossing the Chasm · Moore &nbsp;/&nbsp; Zero to One · Thiel</span></div>
+      <p>Both books land the same punch from opposite ends: do not sell to “everyone who could use it” — take a <b>beachhead</b> small enough to own outright. Owners are wide, shallow, and churn by nature. The <b>1–20-person local SEO / marketing agency</b> is narrow and deep: recurring need, real budget, and a client roster that multiplies every seat you sell. Aim the first release, every email, and every share at them. Let owner virality feed the top of the funnel — but never mistake it for the business.</p>
+    </div>
+  </section>
+
+  <!-- ============ §03 WHAT THE SCRAPER RETURNED ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§03</span><h2>What the scraper actually returned</h2></div>
+    <p class="sec-lede">Real-only data is honest but sparse — a credibility asset that doubles as a leak. Two activation gaps fire <em>before</em> you ever ask for money, and they quietly drag down every number that follows. Fix these first, or everything downstream is measured through a cracked lens.</p>
+    <div class="grid g4" style="margin-bottom:16px">
+      <div class="kpi"><div class="num">13&nbsp;/&nbsp;7</div><div class="lab">median competitors <b>found / audited</b>. Only audited sites get scored.</div></div>
+      <div class="kpi"><div class="num neg">35%</div><div class="lab">of users' <b>own sites</b> couldn't be fully read (partial or unavailable audit).</div></div>
+      <div class="kpi"><div class="num neg">10.5%</div><div class="lab">landed in a <b>thin market</b> (≤1 competitor scored) — a top driver of negative feedback.</div></div>
+      <div class="kpi"><div class="num brass">39%</div><div class="lab">of reports had <b>ratings = N/A</b>. Reviews are what owners actually compete on.</div></div>
+    </div>
+    <div class="grid g2">
+      <div class="card">
+        <div class="eyebrow">Where users land — market status</div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-lab">Behind but recoverable</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="bar-val">40%</span></div>
+          <div class="bar-row"><span class="bar-lab">Low visibility</span><span class="bar-track"><span class="bar-fill" style="width:64%"></span></span><span class="bar-val">26%</span></div>
+          <div class="bar-row"><span class="bar-lab">Competitive</span><span class="bar-track"><span class="bar-fill" style="width:44%"></span></span><span class="bar-val">18%</span></div>
+          <div class="bar-row"><span class="bar-lab">Leading</span><span class="bar-track"><span class="bar-fill" style="width:15%"></span></span><span class="bar-val">6%</span></div>
+        </div>
+        <p style="margin-top:14px; font-size:13px; color:var(--ink-3)">Two-thirds get a result that <em>implies action</em>. That's the built-in hook for a “fix it, then watch it” subscription.</p>
+      </div>
+      <div class="card">
+        <div class="eyebrow">Biggest opportunity flagged</div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-lab">On-page SEO</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="bar-val">25%</span></div>
+          <div class="bar-row"><span class="bar-lab">Conversion elements</span><span class="bar-track"><span class="bar-fill" style="width:95%"></span></span><span class="bar-val">24%</span></div>
+          <div class="bar-row"><span class="bar-lab">Trust signals</span><span class="bar-track"><span class="bar-fill" style="width:93%"></span></span><span class="bar-val">24%</span></div>
+          <div class="bar-row"><span class="bar-lab">Service / location content</span><span class="bar-track"><span class="bar-fill" style="width:73%"></span></span><span class="bar-val">18%</span></div>
+          <div class="bar-row"><span class="bar-lab">Technical fundamentals</span><span class="bar-track"><span class="bar-fill" style="width:34%"></span></span><span class="bar-val">9%</span></div>
+        </div>
+        <p style="margin-top:14px; font-size:13px; color:var(--ink-3)">Gaps cluster in SEO / conversion / trust — each maps cleanly to a “fix-this-first” playbook, a Recon-tier feature.</p>
+      </div>
+    </div>
+    <div class="doctrine" style="margin-top:16px">
+      <div class="tag"><span>From the shelf</span><span class="bk">$100M Offers · Alex Hormozi</span></div>
+      <p>Hormozi's value equation is blunt: value climbs when you <b>slash effort and delay</b>. A free report that can't read a third of users' own sites, or dumps them into an empty thin market, taxes both — the lead magnet dies before the pitch is spoken. The activation fixes (URL retry, widen-radius fallback, one prioritized action) are not polish. They are the difference between a magnet that pulls and a page that shrugs. A lead magnet that isn't a complete win on its own isn't a lead magnet.</p>
+    </div>
+  </section>
+
+  <!-- ============ §04 SENTIMENT ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§04</span><h2>How they reacted</h2></div>
+    <p class="sec-lede">Sentiment isn't hostile — it's <em>stalled</em>, and the free-text says why in one voice: the report is good, and then it stops. “Useful once.” “One-time snapshot and then… nothing.” That's not a quality complaint. It's a retention complaint wearing a quality costume.</p>
+    <div class="card">
+      <div class="eyebrow">Sentiment across 1,000 responses</div>
+      <div class="stack">
+        <div style="width:28%; background:var(--pos)">28% pos</div>
+        <div style="width:47%; background:var(--neu)">47% neutral</div>
+        <div style="width:25%; background:var(--neg)">25% neg</div>
+      </div>
+      <div class="legend">
+        <span><i class="dot" style="background:var(--pos)"></i>Positive — “first competitor tool that didn't feel made-up”</span>
+        <span><i class="dot" style="background:var(--neu)"></i>Neutral — “fine for a gut-check… depends if it updates itself”</span>
+        <span><i class="dot" style="background:var(--neg)"></i>Negative — “useful once, not re-running this by hand”</span>
+      </div>
+    </div>
+    <div class="grid g3" style="margin-top:16px">
+      <div class="card" style="padding:16px 18px"><p style="font-size:14px; margin:0; max-width:none"><span class="mono" style="font-size:10.5px; color:var(--neg); letter-spacing:.08em">DETRACTOR · HVAC</span><br>“Useful once, but I'm not going to re-run this by hand every week. Can it run weekly and just email me when something changes?”</p></div>
+      <div class="card" style="padding:16px 18px"><p style="font-size:14px; margin:0; max-width:none"><span class="mono" style="font-size:10.5px; color:var(--neu); letter-spacing:.08em">NEUTRAL · RESTAURANT</span><br>“Fine for a gut-check. Whether I keep using it depends on whether it updates itself. Would love ratings/reviews.”</p></div>
+      <div class="card" style="padding:16px 18px"><p style="font-size:14px; margin:0; max-width:none"><span class="mono" style="font-size:10.5px; color:var(--pos); letter-spacing:.08em">PROMOTER · PEST CONTROL</span><br>“More useful than the SEO-audit spam I usually get. Set-and-forget weekly monitoring would make this a keeper.”</p></div>
+    </div>
+    <div class="callout brass" style="margin-top:16px">
+      <span class="k">Read the neutral 47%, not just the detractors</span>
+      <p>The detractors are loud; the neutral 47% is the prize. They aren't unhappy — they're <b>waiting to see it move</b>. “Not sure what to do first” and “want to see it over time” aren't rejections, they're conditional loyalty with a price tag: one prioritized next-action and one trend line. Convert this block and sentiment flips without a single new data source. Cheapest retention win on the board — take it first.</p>
+    </div>
+  </section>
+
+  <!-- ============ §05 REQUESTS ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§05</span><h2>The roadmap the users wrote themselves</h2></div>
+    <p class="sec-lede">Feature requests as a share of all 1,000 responses (most gave 1–3). Stop treating this as a wishlist — it's a <em>spec</em>. Every top request names a documented limitation in the current build, and they collapse into exactly two jobs: <span style="color:var(--accent); font-weight:600">close the retention loop</span> and <span style="color:var(--brass); font-weight:600">deepen the data</span>. Your users already wrote the roadmap. The only mistake left is building something else.</p>
+    <div class="card">
+      <div class="bars">
+        <div class="bar-row"><span class="bar-lab">Reviews / ratings signal</span><span class="bar-track"><span class="bar-fill brass" style="width:100%"></span></span><span class="bar-val">14.7%</span></div>
+        <div class="bar-row"><span class="bar-lab">Recurring monitoring</span><span class="bar-track"><span class="bar-fill" style="width:93%"></span></span><span class="bar-val">13.6%</span></div>
+        <div class="bar-row"><span class="bar-lab">Score / rank history</span><span class="bar-track"><span class="bar-fill" style="width:86%"></span></span><span class="bar-val">12.7%</span></div>
+        <div class="bar-row"><span class="bar-lab">Change alerts</span><span class="bar-track"><span class="bar-fill" style="width:84%"></span></span><span class="bar-val">12.3%</span></div>
+        <div class="bar-row"><span class="bar-lab">AI plain-English summary</span><span class="bar-track"><span class="bar-fill" style="width:80%"></span></span><span class="bar-val">11.7%</span></div>
+        <div class="bar-row"><span class="bar-lab">Google Business Profile</span><span class="bar-track"><span class="bar-fill brass" style="width:71%"></span></span><span class="bar-val">10.4%</span></div>
+        <div class="bar-row"><span class="bar-lab">Scheduled email digest</span><span class="bar-track"><span class="bar-fill" style="width:69%"></span></span><span class="bar-val">10.2%</span></div>
+        <div class="bar-row"><span class="bar-lab">White-label / branded PDF</span><span class="bar-track"><span class="bar-fill brass" style="width:69%"></span></span><span class="bar-val">10.1%</span></div>
+        <div class="bar-row"><span class="bar-lab">More competitors / radius</span><span class="bar-track"><span class="bar-fill" style="width:61%"></span></span><span class="bar-val">9.0%</span></div>
+        <div class="bar-row"><span class="bar-lab">Verified (not directional) facts</span><span class="bar-track"><span class="bar-fill brass" style="width:58%"></span></span><span class="bar-val">8.5%</span></div>
+        <div class="bar-row"><span class="bar-lab">Multi-location account</span><span class="bar-track"><span class="bar-fill brass" style="width:57%"></span></span><span class="bar-val">8.4%</span></div>
+        <div class="bar-row"><span class="bar-lab">Fix-this-first playbook</span><span class="bar-track"><span class="bar-fill" style="width:56%"></span></span><span class="bar-val">8.2%</span></div>
+      </div>
+      <div class="legend" style="margin-top:16px">
+        <span><i class="dot" style="background:var(--accent)"></i>Retention loop — Phase 1 → Recon tier</span>
+        <span><i class="dot" style="background:var(--brass)"></i>Data depth &amp; scale — Phase 2–4 → Command / Ops</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ §06 THE LOOP ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§06</span><h2>The retention loop — the whole ballgame</h2></div>
+    <p class="sec-lede">You do not fix a one-and-done tool with a better report. You fix it with a <em>habit.</em> Nir Eyal's Hook Model is the precise shape of that habit — four stages — and Benchmark Scout can build every one of them from features users already begged for. This section is the company.</p>
+
+    <div class="loop">
+      <div class="node">
+        <div class="step">01 · Trigger</div>
+        <h4>The email that pulls them back</h4>
+        <p>A monitored change fires an external trigger — no willpower required from the user.</p>
+        <div class="feat">→ change alerts + monthly digest</div>
+      </div>
+      <div class="node">
+        <div class="step">02 · Action</div>
+        <h4>One click to the report</h4>
+        <p>Open the saved report to see what moved. The simplest possible action, already built.</p>
+        <div class="feat">→ saved business + market</div>
+      </div>
+      <div class="node">
+        <div class="step">03 · Variable reward</div>
+        <h4>Something changed</h4>
+        <p>A rival's rank slipped, a new competitor opened, a review score shifted — never the same twice.</p>
+        <div class="feat">→ score / rank history, trends</div>
+      </div>
+      <div class="node">
+        <div class="step">04 · Investment</div>
+        <h4>They make it theirs</h4>
+        <p>Add a competitor to watch, set alert thresholds, fix a flagged gap. Each act deepens the next loop.</p>
+        <div class="feat">→ watchlist + fix-first playbook</div>
+      </div>
+    </div>
+
+    <div class="doctrine" style="margin-top:16px">
+      <div class="tag"><span>From the shelf</span><span class="bk">Hooked · Nir Eyal</span></div>
+      <p>The loop above <em>is</em> the product's missing second act. Today's one-time report has a trigger and an action but <b>zero variable reward and zero investment</b> — two of the four stages are simply absent, so the habit can't form and the NPS can't recover. Half a loop is no loop. Ship all four stages together and the tool stops being something you <em>use</em> and becomes something you <b>check</b> — the exact release that erases the −21.6. Ship them apart and you've shipped nothing.</p>
+    </div>
+
+    <h3 style="font-family:var(--serif); font-weight:600; font-size:1.25rem; margin:34px 0 4px; letter-spacing:-.01em">Build in this order</h3>
+    <p style="color:var(--ink-2); max-width:74ch; margin:0 0 8px">Sequenced so the first paid release fixes NPS <em>and</em> mints the flagship tier in one shot. Nothing here is speculative — every phase closes a gap the corpus named out loud. Do not reorder it.</p>
+
+    <div class="phase">
+      <div class="pn">P·0</div>
+      <div>
+        <h3>Activation fixes <span class="tag">pre-monetization</span></h3>
+        <p><b>(1)</b> URL confirm / retry / manual override so the 35% of unreadable own-sites can self-correct at input. <b>(2)</b> Widen-radius fallback + “add a competitor manually” for the 10.5% thin-market runs. <b>(3)</b> A single prioritized “fix this first” line on the free report — resolves “not sure what to do” and teases Recon.</p>
+        <div class="ship">Fixes: 35% incomplete self-audit · 10.5% thin markets · neutral-47% “what do I do first”</div>
+      </div>
+    </div>
+    <div class="phase">
+      <div class="pn">P·1</div>
+      <div>
+        <h3>Close the loop <span class="tag">the whole ballgame</span></h3>
+        <p>Accounts + saved business/market, <b>recurring monitoring</b> (monthly default, weekly option), <b>change alerts</b> + monthly digest, <b>score/rank history</b> with trend charts, a competitor watchlist, and an <b>AI plain-English summary + prioritized playbook</b>. This is the release that turns a tool into a subscription. If you build one thing this quarter, it is this — everything else is a rounding error beside it.</p>
+        <div class="ship">Ships the Recon (Pro) tier · addresses 69% recurring-update demand + 4 of the top-5 requests</div>
+      </div>
+    </div>
+    <div class="phase">
+      <div class="pn">P·2</div>
+      <div>
+        <h3>Deepen the signal <span class="tag">credibility</span></h3>
+        <p>Bring in <b>reviews/ratings</b> and <b>Google Business Profile / maps-pack visibility</b> — the #1 request and the 39% “ratings N/A” gap — plus a verified-facts layer. A policy decision is required (see §10): do this via owner-authorized first-party connections to stay real-only, not scraped third-party data.</p>
+        <div class="ship">Ships toward Command (Business) · #1 requested feature (14.7%)</div>
+      </div>
+    </div>
+    <div class="phase">
+      <div class="pn">P·3</div>
+      <div>
+        <h3>Accounts &amp; scale <span class="tag">expansion revenue</span></h3>
+        <p><b>Multi-location</b> / multiple markets under one account, <b>team seats</b>, CSV / <b>API export</b>, benchmark-vs-national-industry, saved watchlists. Unlocks the franchise/multi-location segment (6% of base, high retention) and net-revenue expansion inside existing accounts.</p>
+        <div class="ship">Completes Command · targets the 8.4% multi-location + 6% franchise demand</div>
+      </div>
+    </div>
+    <div class="phase">
+      <div class="pn">P·4</div>
+      <div>
+        <h3>Agency &amp; white-label <span class="tag">highest ARPU</span></h3>
+        <p><b>White-label / branded reports</b>, a <b>client dashboard</b> across many businesses, bulk runs, priority processing. 11% of the base are agencies and roughly half explicitly want white-label — the smallest segment but the highest revenue per account, and the beachhead §02 tells us to lead with.</p>
+        <div class="ship">Ships the Ops (Agency) tier · ~111 agency accounts, median $29/client</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ §07 PRICING ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§07</span><h2>Tiered monthly plans</h2></div>
+    <p class="sec-lede">Prices are not guessed — they're anchored to the willingness-to-pay curve the corpus drew. Free stays the acquisition engine, no apologies. Recon is the flagship, planted dead on the $19 median where <b>63% are still willing</b> — high enough to matter, low enough that the “yes” is reflexive. Don't get cute with it.</p>
+
+    <div class="tiers">
+      <div class="tier">
+        <div class="code">Tier 0</div>
+        <h3>Scout</h3>
+        <div class="price">Free</div>
+        <div class="who">The funnel. Every new user starts here.</div>
+        <ul>
+          <li>1 live report per run</li>
+          <li>Website audit + competitor discovery</li>
+          <li>Source-backed PDF + share link</li>
+          <li>One “fix this first” action</li>
+        </ul>
+        <div class="target">Acquisition · the lead magnet</div>
+      </div>
+      <div class="tier flag">
+        <div class="flagtag">◆ Flagship</div>
+        <div class="code">Tier 1</div>
+        <h3>Recon</h3>
+        <div class="price">$19<small>/mo</small></div>
+        <div class="who">Owners who want it watched, not re-run by hand.</div>
+        <ul>
+          <li>Everything in Scout, saved</li>
+          <li>Recurring monitoring + alerts</li>
+          <li>Score &amp; rank history</li>
+          <li>Email digest + watchlist</li>
+          <li>AI summary + fix-first playbook</li>
+        </ul>
+        <div class="target">63% will pay ≥ $19 · 65% of paid intent</div>
+      </div>
+      <div class="tier">
+        <div class="code">Tier 2</div>
+        <h3>Command</h3>
+        <div class="price">$49<small>/mo</small></div>
+        <div class="who">High-value trades &amp; multi-location operators.</div>
+        <ul>
+          <li>Everything in Recon</li>
+          <li>Reviews / ratings + GBP signal</li>
+          <li>Verified-facts depth</li>
+          <li>Up to 5 markets · 3 seats</li>
+          <li>CSV / API export + benchmarks</li>
+        </ul>
+        <div class="target">24% will pay ≥ $49 · 23% of paid intent</div>
+      </div>
+      <div class="tier">
+        <div class="code">Tier 3</div>
+        <h3>Ops</h3>
+        <div class="price">$129<small>/mo</small></div>
+        <div class="who">Agencies managing many clients.</div>
+        <ul>
+          <li>Everything in Command</li>
+          <li>White-label / branded reports</li>
+          <li>Client dashboard, many businesses</li>
+          <li>Bulk runs + priority</li>
+          <li>Or $99 + $10 / client</li>
+        </ul>
+        <div class="target">11% agency segment · highest ARPU</div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:20px; align-items:stretch">
+      <div class="card">
+        <div class="eyebrow">Willingness-to-pay demand curve</div>
+        <p style="font-size:13px; color:var(--ink-3); margin:0 0 8px; max-width:none">Share of respondents willing to pay at least each price point. The elbow sits at $19–29 — where Recon and Command are set.</p>
+        <svg class="demand" viewBox="0 0 460 240" role="img" aria-label="Willingness-to-pay demand curve: 80% at $9, 63% at $19, 40% at $29, 24% at $49, 10% at $99">
+          <line class="axis" x1="46" y1="20" x2="46" y2="200"></line>
+          <line class="axis" x1="46" y1="200" x2="440" y2="200"></line>
+          <line class="axis" x1="46" y1="110" x2="440" y2="110" style="opacity:.5"></line>
+          <line class="axis" x1="46" y1="65" x2="440" y2="65" style="opacity:.5"></line>
+          <line class="axis" x1="46" y1="155" x2="440" y2="155" style="opacity:.5"></line>
+          <text x="40" y="204" text-anchor="end">0%</text>
+          <text x="40" y="114" text-anchor="end">50%</text>
+          <text x="40" y="24" text-anchor="end">100%</text>
+          <polygon class="area" points="70,55.6 158,87.1 228,128.4 298,157.5 420,181.5 420,200 70,200"></polygon>
+          <polyline class="line" points="70,55.6 158,87.1 228,128.4 298,157.5 420,181.5"></polyline>
+          <circle class="pt" cx="70" cy="55.6" r="4"></circle>
+          <circle class="pt" cx="158" cy="87.1" r="5"></circle>
+          <circle class="pt" cx="228" cy="128.4" r="5"></circle>
+          <circle class="pt" cx="298" cy="157.5" r="4"></circle>
+          <circle class="pt" cx="420" cy="181.5" r="4"></circle>
+          <text class="plab" x="70" y="47" text-anchor="middle">80%</text>
+          <text class="plab" x="158" y="78" text-anchor="middle">63%</text>
+          <text class="plab" x="228" y="120" text-anchor="middle">40%</text>
+          <text class="plab" x="298" y="149" text-anchor="middle">24%</text>
+          <text class="plab" x="418" y="173" text-anchor="middle">10%</text>
+          <text x="70" y="216" text-anchor="middle">$9</text>
+          <text x="158" y="216" text-anchor="middle">$19</text>
+          <text x="228" y="216" text-anchor="middle">$29</text>
+          <text x="298" y="216" text-anchor="middle">$49</text>
+          <text x="420" y="216" text-anchor="middle">$99</text>
+        </svg>
+      </div>
+      <div class="card">
+        <div class="eyebrow">Illustrative MRR model</div>
+        <p style="font-size:13px; color:var(--ink-2); margin:0 0 12px; max-width:none">Per <b>1,000</b> free reports/month, converting into the observed plan mix (Recon 65% / Command 23% / Ops 11%, blended ARPU ≈ $38). New MRR added by each monthly cohort — <em>compounds with retention.</em></p>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Free→paid</th><th class="num">Paid / cohort</th><th class="num">New MRR</th><th class="num">New ARR run-rate</th></tr></thead>
+            <tbody>
+              <tr><td>4% (cautious)</td><td class="num">40</td><td class="num">$1,520</td><td class="num">$18.2k</td></tr>
+              <tr><td>6% (base)</td><td class="num">60</td><td class="num">$2,280</td><td class="num">$27.4k</td></tr>
+              <tr><td>10% (engaged)</td><td class="num">100</td><td class="num">$3,800</td><td class="num">$45.6k</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="font-size:12px; color:var(--ink-3); margin:12px 0 0; max-width:none">Modeled, not forecast. Add an <b>annual plan (2 months free)</b> to capture the price-sensitive $9 bucket (17%) without discounting the median.</p>
+      </div>
+    </div>
+
+    <div class="doctrine" style="margin-top:16px">
+      <div class="tag"><span>From the shelf</span><span class="bk">The Mom Test · Rob Fitzpatrick</span></div>
+      <p>Fitzpatrick's warning is the discipline that keeps this honest: <b>anything about the future is an over-optimistic lie.</b> The corpus is self-selected feedback-givers, so its 80% pay-intent is a ceiling, not a forecast — which is exactly why the model runs a 4–10% band and the footer calls every projection a hypothesis. “I'd pay for this” is worth nothing until a card is on file. Treat the numbers above as a target to <b>go prove</b>, never as money in the bank.</p>
+    </div>
+  </section>
+
+  <!-- ============ §08 GTM OUTREACH ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§08</span><h2>Go-to-market — reach the beachhead</h2></div>
+    <p class="sec-lede">You're hunting one animal: the small shop that already does competitor research for local clients <em>on a schedule.</em> Budget, recurring need, a roster that multiplies every seat. Qualify ruthlessly before you spend a single email — a great pitch to the wrong list is still a wasted send.</p>
+
+    <div class="icp">
+      <div class="panel">
+        <h3>Go after them if</h3>
+        <ul class="fit">
+          <li>1–20-person local SEO / digital marketing shop, or a solo consultant</li>
+          <li>Their clients are physical businesses — dentists, restaurants, contractors, clinics</li>
+          <li>They send clients monthly reports (their site will say so)</li>
+          <li>They already pay for BrightLocal, Semrush, or a rank tracker</li>
+          <li>They white-label their deliverables</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>Skip them if</h3>
+        <ul class="skip">
+          <li>National brand or enterprise agency with its own analysts</li>
+          <li>They build their own data pipelines</li>
+          <li>E-commerce or SaaS clients only — no local angle</li>
+          <li>One-person shop with one or two clients — won't stick</li>
+        </ul>
+      </div>
+    </div>
+    <div class="find">
+      <b>Where they are</b>
+      Search “local SEO agency [city]” and “[city] digital marketing.” Comb the local-SEO categories on Clutch and UpCity. Watch who posts rank-tracker screenshots on LinkedIn. Sit in the marketing Slack groups, r/SEO, and r/agency — the people complaining about client reporting are the whole list.
+    </div>
+
+    <h3 style="font-family:var(--serif); font-weight:600; font-size:1.25rem; margin:32px 0 4px; letter-spacing:-.01em">Lead with the report, not the pitch</h3>
+    <p style="color:var(--ink-2); max-width:74ch; margin:0 0 16px">Run their report <em>before</em> you write a word. The email is just the envelope — the report is the pitch, already finished, already useful. Be specific, then get out of the way. The highlighted fields swap per prospect.</p>
+
+    <div class="email">
+      <div class="email-tag"><span>Email 1 · Opener</span><span>Day 0</span></div>
+      <div class="email-body">
+        <p class="subject"><i>Subject</i>competitor breakdown for <span class="ph">[Client]</span>, done</p>
+        <div class="email-copy">
+          <p>Hi <span class="ph">[Name]</span> — saw you run local SEO for <span class="ph">[type of clients]</span>.</p>
+          <p>I built a tool that generates a competitor breakdown for any local business in about 30 seconds. Real data, real sources, ready to white-label. I ran one for <span class="ph">[their client / a business in their city]</span> so you can just look at it: <span class="ph">[link]</span>.</p>
+          <p>If it saves you an hour of deck-building, it's worth a reply. I'll set you up.</p>
+        </div>
+        <p class="note">Why it works: the link is the whole pitch. No ask beyond “look at this.” Value delivered before they decide.</p>
+      </div>
+    </div>
+    <div class="email">
+      <div class="email-tag"><span>Email 2 · Nudge</span><span>Day 3 · same thread</span></div>
+      <div class="email-body">
+        <p class="subject"><i>Subject</i>re: competitor breakdown for <span class="ph">[Client]</span></p>
+        <div class="email-copy">
+          <p>Quick nudge — did the <span class="ph">[Client]</span> breakdown land?</p>
+          <p>If competitor research isn't a headache for you, say so and I'll leave it. If it is, I'll show you the version that spits out one of these for every client on your roster.</p>
+        </div>
+        <p class="note">Why it works: gives them an easy out. Permission to say no gets more replies than another sell.</p>
+      </div>
+    </div>
+    <div class="email">
+      <div class="email-tag"><span>Email 3 · Close-out</span><span>Day 7 · same thread</span></div>
+      <div class="email-body">
+        <p class="subject"><i>Subject</i>re: competitor breakdown for <span class="ph">[Client]</span></p>
+        <div class="email-copy">
+          <p>Last one from me.</p>
+          <p>If client competitor reports ever start eating your time, it's at <span class="ph">[link]</span>. I'll leave you be either way.</p>
+        </div>
+        <p class="note">Why it works: the breakup email reliably outperforms a second follow-up. Low pressure, door still open.</p>
+      </div>
+    </div>
+    <div class="email">
+      <div class="email-tag"><span>Variant · Business owner</span><span>Funnel fuel, not the core</span></div>
+      <div class="email-body">
+        <p class="subject"><i>Subject</i>how <span class="ph">[Business]</span> stacks up in <span class="ph">[City]</span></p>
+        <div class="email-copy">
+          <p>Hi <span class="ph">[Name]</span> — ran <span class="ph">[Business]</span> against your nearest competitors in <span class="ph">[City]</span>. Here's the breakdown: <span class="ph">[link]</span>.</p>
+          <p>No pitch. If it's useful, there's more where it came from.</p>
+        </div>
+        <p class="note">Owners are top-of-funnel, not the paying core — but they share these, and the share is the point.</p>
+      </div>
+    </div>
+
+    <div class="doctrine" style="margin-top:16px">
+      <div class="tag"><span>From the shelf</span><span class="bk">Never Split the Difference · Voss &nbsp;/&nbsp; The Mom Test · Fitzpatrick</span></div>
+      <p>Voss proved that inviting a <b>“no”</b> disarms people faster than any pitch — “say so and I'll leave it” pulls more replies than one more sell, which is why the nudge and the breakup carry the whole sequence. And Fitzpatrick's rule runs through the opener: <b>lead with a specific thing you already did, never a hypothetical.</b> The report <em>is</em> the ask. There is nothing to over-promise, because the value is already sitting in their inbox.</p>
+    </div>
+  </section>
+
+  <!-- ============ §09 WHAT WORKING LOOKS LIKE ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§09</span><h2>What “working” looks like — and in what order</h2></div>
+    <p class="sec-lede">Three numbers decide whether this is a business — and they only count in order. Nail one before you chase the next. And do not scale a funnel you cannot see: without analytics, every number below is a feeling.</p>
+    <div class="metrics">
+      <div class="metric"><span class="num">3–5%</span><p class="txt"><b>Cold-email reply rate.</b> Below 3% means the list or the copy is wrong, not the product. Owners reply more than execs — use it.</p></div>
+      <div class="metric"><span class="num">&lt; 1 sitting</span><p class="txt"><b>Time to first finished report</b> on a business they care about. Miss this and they don't come back — it's the activation gate.</p></div>
+      <div class="metric"><span class="num">Week 4</span><p class="txt"><b>Do accounts return and run another report a month later?</b> The north star from §01 — the only number that says you have a business.</p></div>
+    </div>
+
+    <h3 style="font-family:var(--serif); font-weight:600; font-size:1.25rem; margin:30px 0 12px; letter-spacing:-.01em">Order of operations</h3>
+    <ol class="steps">
+      <li><b>Turn on analytics.</b> Signup, report run, share, return. Everything below is guesswork without it — and it's the one gap in the product today.</li>
+      <li><b>Hand-run 25–50 reports.</b> Send them yourself, get 5–10 agencies on a call. Learn what they'd actually pay for before automating anything.</li>
+      <li><b>Add billing and the agency tier</b> once someone says the words “I'd pay for this.” Convert the warmest waitlist names first.</li>
+      <li><b>Build scheduled monthly reports and change alerts.</b> New competitor opened, a rival changed pricing or started hiring — the reason they stay, so the feature that matters most.</li>
+      <li><b>Let shares and SEO pages compound</b> in the background while outreach carries the near term.</li>
+    </ol>
+
+    <div class="doctrine" style="margin-top:18px">
+      <div class="tag"><span>From the shelf</span><span class="bk">The Lean Startup · Ries &nbsp;/&nbsp; The Mom Test · Fitzpatrick</span></div>
+      <p>Step 1 is Ries's entire thesis in one line: signups are a <b>vanity metric</b>, cohort return is an <b>actionable</b> one, and you cannot improve a retention number you refuse to measure — so it comes before everything. Steps 2–3 are the Mom Test with its sleeves rolled up: <b>hand-run the reports and get on the calls before you write a line of billing code.</b> Let behavior shape the agency tier. A survey's optimism has already lied to you once — see the 80%.</p>
+    </div>
+  </section>
+
+  <!-- ============ §10 THE DECISION ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§10</span><h2>The one real decision to make</h2></div>
+    <p class="sec-lede">The top data-depth requests — reviews/ratings, Google Business Profile, verified facts — smash straight into Benchmark Scout's founding vow: <b>real-only, free sources, no paid APIs, nothing behind a login.</b> You cannot hand-wave this one. Pick a side, on purpose, and know exactly what it costs.</p>
+    <div class="grid g2">
+      <div class="card">
+        <h3 style="margin:0 0 8px; font-family:var(--serif); font-size:1.2rem; font-weight:600">Option A — Stay strictly real-only</h3>
+        <p style="font-size:14px; color:var(--ink-2)">Unlock reviews/GBP through <b>owner-authorized first-party connections</b> — the official, free Google Business Profile API the owner opts into for <em>their own</em> listing. Preserves provenance integrity and the “didn't feel made-up” trust that's already the top praise.</p>
+        <p style="font-size:13px; color:var(--pos); margin:0; max-width:none"><b>Recommended.</b> Keeps the brand promise; still ships the #1 request.</p>
+      </div>
+      <div class="card">
+        <h3 style="margin:0 0 8px; font-family:var(--serif); font-size:1.2rem; font-weight:600">Option B — Paid data on paid tiers</h3>
+        <p style="font-size:14px; color:var(--ink-2)">Introduce licensed third-party review/ratings data on Command+, clearly <b>labelled by provenance</b> and walled off from the free real-only report. Faster and broader coverage, but dilutes the founding stance and adds COGS per report.</p>
+        <p style="font-size:13px; color:var(--ink-3); margin:0; max-width:none">Viable as a later add-on — not the opening move.</p>
+      </div>
+    </div>
+    <div class="doctrine" style="margin-top:16px">
+      <div class="tag"><span>From the shelf</span><span class="bk">Obviously Awesome · April Dunford</span></div>
+      <p>Positioning is won by <b>owning one word</b>, and Benchmark Scout already owns <b>“real”</b> — the top promoter praise is, verbatim, “didn't feel made-up.” Option B sells that word for coverage. Option A keeps it and still ships the #1 feature. The schema already carries a <span class="mono" style="font-size:13px">provenance.policy: "real-only"</span> flag, so owner-authorized first-party sources drop in without cracking the one thing users trust. This isn't a close call. Lead with A, and don't relitigate it.</p>
+    </div>
+  </section>
+
+  <!-- ============ THE SHELF ============ -->
+  <section>
+    <div class="sec-head"><span class="sec-idx">§ ✦</span><h2>The shelf — doctrine, applied</h2></div>
+    <p class="sec-lede">Every operator cited above, in one place, each nailed to the exact move it forced. No teaching made this list for flavor — if it didn't change a decision in this report, it isn't here. Doctrine you can act on Monday, not a reading list.</p>
+    <div class="shelf">
+      <div class="book">
+        <div class="ttl">Hooked<small>Nir Eyal</small></div>
+        <p class="use">Trigger → Action → Variable Reward → Investment. <b>The Recon loop in §06</b> — the release that ends one-and-done.</p>
+      </div>
+      <div class="book">
+        <div class="ttl">The Lean Startup<small>Eric Ries</small></div>
+        <p class="use">Sticky engine of growth; vanity vs. actionable metrics. <b>Week-4 cohort return as the north star</b>, and analytics before anything else.</p>
+      </div>
+      <div class="book">
+        <div class="ttl">The Mom Test<small>Rob Fitzpatrick</small></div>
+        <p class="use">Stated intent is an over-optimistic lie. <b>The 4–10% band under the 80%</b>, and hand-running reports before building billing.</p>
+      </div>
+      <div class="book">
+        <div class="ttl">Crossing the Chasm · Zero to One<small>Geoffrey Moore · Peter Thiel</small></div>
+        <p class="use">Win a beachhead small enough to dominate. <b>Agencies over owners</b> as the segment every email and feature points at first.</p>
+      </div>
+      <div class="book">
+        <div class="ttl">$100M Offers<small>Alex Hormozi</small></div>
+        <p class="use">A lead magnet must be a complete win; value = outcome ÷ effort &amp; delay. <b>The activation fixes in §03</b> that make the free report land.</p>
+      </div>
+      <div class="book">
+        <div class="ttl">Never Split the Difference<small>Chris Voss</small></div>
+        <p class="use">A “no” makes people feel safe. <b>The “say so and I'll leave it” nudge and the breakup email</b> in §08.</p>
+      </div>
+      <div class="book">
+        <div class="ttl">Obviously Awesome<small>April Dunford</small></div>
+        <p class="use">Positioning is owning one word. <b>Defending “real”</b> — the case for Option A over paid third-party data in §10.</p>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">
+    Benchmark Scout · The Retention Report · internal — not for distribution<br>
+    Source: <b>1,000 simulated field reports</b>, modeled the way the live product captures data (report result + waitlist / post-report feedback), window 05 Jun – 20 Jul 2026 · benchmark-scout.vercel.app · live, open beta.<br>
+    Figures are modeled, not forecast. The corpus is self-selected feedback-givers; its pay-intent overstates whole-funnel conversion — treat every projection as a hypothesis to validate, per §09.
+  </p>
+
+</div>
+
+</body>
+</html>

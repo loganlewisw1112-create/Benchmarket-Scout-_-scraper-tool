@@ -21,15 +21,47 @@ function ageMs(snapshot: SampleSnapshotV2, now: number): number {
   return now - Date.parse(snapshot.generatedAt);
 }
 
+function retainedSnapshotsFromReads(
+  reads: readonly CatalogSampleRead[],
+  now: number = Date.now()
+): SampleSnapshotV2[] {
+  return reads
+    .flatMap((read) =>
+      read.outcome.status === "ok" ? [read.outcome.value] : []
+    )
+    .filter((snapshot) => ageMs(snapshot, now) >= 0)
+    .sort((a, b) => Date.parse(b.generatedAt) - Date.parse(a.generatedAt));
+}
+
 export function activeSnapshotsFromReads(
   reads: readonly CatalogSampleRead[],
   now: number = Date.now()
 ): SampleSnapshotV2[] {
-  return reads.flatMap((read) => {
-    if (read.outcome.status !== "ok") return [];
-    const age = ageMs(read.outcome.value, now);
-    return age >= 0 && age <= SAMPLE_MAX_AGE_MS ? [read.outcome.value] : [];
-  }).slice(0, SAMPLE_PUBLIC_POOL_SIZE);
+  return retainedSnapshotsFromReads(reads, now)
+    .filter((snapshot) => ageMs(snapshot, now) <= SAMPLE_MAX_AGE_MS)
+    .slice(0, SAMPLE_PUBLIC_POOL_SIZE);
+}
+
+/**
+ * Prefer fresh (<72h) samples. When the active pool is empty but last-good
+ * snapshots still exist, serve the freshest retained ones so the public
+ * sample button does not hard-fail while refresh catches up.
+ */
+export function selectableSnapshotsFromReads(
+  reads: readonly CatalogSampleRead[],
+  now: number = Date.now()
+): SampleSnapshotV2[] {
+  const active = activeSnapshotsFromReads(reads, now);
+  if (active.length > 0) return active;
+  return retainedSnapshotsFromReads(reads, now).slice(0, SAMPLE_PUBLIC_POOL_SIZE);
+}
+
+export function sampleFreshness(
+  snapshot: SampleSnapshotV2,
+  now: number = Date.now()
+): "active" | "retained" {
+  const age = ageMs(snapshot, now);
+  return age >= 0 && age <= SAMPLE_MAX_AGE_MS ? "active" : "retained";
 }
 
 export async function listActiveSampleSnapshots(
@@ -45,11 +77,14 @@ export async function selectRandomActiveSample(
   excludeSampleId?: string,
   now: number = Date.now()
 ): Promise<SampleSnapshotV2 | null> {
-  const active = (await listActiveSampleSnapshots(now)).filter(
+  const reads = await readSampleSnapshotsV2(
+    SAMPLE_CATALOG.map((entry) => entry.id)
+  );
+  const selectable = selectableSnapshotsFromReads(reads, now).filter(
     (snapshot) => snapshot.sampleId !== excludeSampleId
   );
-  if (active.length === 0) return null;
-  return active[crypto.randomInt(active.length)] ?? null;
+  if (selectable.length === 0) return null;
+  return selectable[crypto.randomInt(selectable.length)] ?? null;
 }
 
 export function samplePoolHealthFromReads(

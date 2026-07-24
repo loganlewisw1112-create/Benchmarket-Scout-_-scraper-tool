@@ -64,6 +64,13 @@ jobs:
             exit 0
           fi
 
+          active_samples=$(jq -r '.activeSampleCount // empty' "$body" 2>/dev/null || true)
+          if [ -n "$active_samples" ] && [ "$active_samples" -lt 10 ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=activeSampleCount=$active_samples (need at least 10 fresh samples)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           echo "ok=true" >> "$GITHUB_OUTPUT"
 
       - name: Check landing page

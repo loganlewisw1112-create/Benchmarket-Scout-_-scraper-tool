@@ -9,11 +9,19 @@ import SourcesAppendix from "./ProvenanceDetails";
 
 export default function ResultsDashboard({
   data,
+  sampleFreshness = null,
 }: {
   data: AnalyzeMarketResponse;
+  sampleFreshness?: "active" | "retained" | null;
 }) {
   return (
     <div className="space-y-6">
+      {sampleFreshness === "retained" ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          Showing a retained real sample while fresh samples refresh. Numbers
+          are still from a verified live run — just older than 72 hours.
+        </div>
+      ) : null}
       <ReportCard data={data} />
       <DataQualityBanner dataQuality={data.dataQuality} />
       <ScoreCards user={data.user} summary={data.summary} />
