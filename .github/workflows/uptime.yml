@@ -19,8 +19,8 @@ concurrency:
 
 env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  HEALTH_URL: https://benchmarket-scout-scraper-tool.vercel.app/api/health
-  SITE_URL: https://benchmarket-scout-scraper-tool.vercel.app/
+  HEALTH_URL: https://benchmark-scout.vercel.app/api/health
+  SITE_URL: https://benchmark-scout.vercel.app/
   ISSUE_TITLE: "Production uptime check failing"
   ISSUE_LABEL: uptime
 

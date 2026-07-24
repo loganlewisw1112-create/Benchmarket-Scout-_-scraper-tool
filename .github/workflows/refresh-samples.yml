@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      SAMPLE_REFRESH_URL: https://benchmarket-scout-scraper-tool.vercel.app/api/sample-report/refresh
+      SAMPLE_REFRESH_URL: https://benchmark-scout.vercel.app/api/sample-report/refresh
       SAMPLE_REFRESH_SECRET: ${{ secrets.SAMPLE_REFRESH_SECRET }}
       REQUESTED_CATALOG_IDS: ${{ inputs.catalog_ids || '' }}
       REQUIRED_SUCCESSES: ${{ inputs.required_successes || '12' }}
