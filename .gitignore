@@ -60,3 +60,6 @@ next-env.d.ts
 
 # scratch file from sandbox tooling (safe to delete)
 __trunc_test.tmp
+
+# excluded 2026-09-08 - stale scratch/test-run output
+/.tmp-*
