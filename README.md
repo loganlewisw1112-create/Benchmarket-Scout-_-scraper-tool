@@ -131,65 +131,30 @@ on every push and pull request.
 
 ## Deployment
 
-The hosted build runs on Vercel with an Upstash (Vercel KV) store behind it.
-It's live in open beta at **[benchmark-scout.vercel.app](https://benchmark-scout.vercel.app)**;
-full launch and rollback steps live in [DEPLOY.md](./DEPLOY.md).
+The hosted build runs on Vercel with an Upstash (Vercel KV) store behind it, live in
+open beta at **[benchmark-scout.vercel.app](https://benchmark-scout.vercel.app)**. It
+needs the KV store plus a few environment variables — `KV_REST_API_URL` /
+`KV_REST_API_TOKEN`, an optional `SCOUT_API_KEY`, and `MAINTENANCE_MODE` (a clean
+holding state that keeps `/api/health` up while pausing analysis). The full list and
+the launch/rollback steps are in [DEPLOY.md](./DEPLOY.md).
 
-Hosting environment variables, on top of the local ones:
-
-```bash
-CACHE_DIR="/tmp/.cache"       # the Vercel project root is read-only
-KV_REST_API_URL=...           # Upstash / Vercel KV — durable reports + waitlist
-KV_REST_API_TOKEN=...         # falls back to the filesystem store locally
-SCOUT_API_KEY=...             # optional shared secret; gates analyze + waitlist
-SAMPLE_REFRESH_SECRET=...     # protects the sample-refresh route
-MAINTENANCE_MODE=true         # flip off once launch gates pass
-```
-
-`MAINTENANCE_MODE=true` disables analysis, samples, and stored/shared reports
-while keeping `/api/health` at `200` with `maintenance: true` — a clean holding
-state, not an outage.
-
-Public endpoints:
-
-| Endpoint | Purpose |
-|---|---|
-| `POST /api/analyze-market` | Run the analysis pipeline (10 req/min per client) |
-| `GET /api/health` | Liveness: status, uptime, sample freshness |
-| `GET /api/sample-report` | A cached real sample, no external calls |
-| `POST /api/sample-report/refresh` | Protected refresh for one catalog sample |
-| `GET /api/reports/[id]` | A saved report as JSON |
-| `POST /api/waitlist` | Join the waitlist (validated, rate-limited) |
-| `GET /r/[id]` | Shareable, read-only report page |
+The API surface is small: `POST /api/analyze-market` runs the pipeline (rate-limited),
+`GET /api/health` reports liveness, `GET /api/sample-report` returns a cached real
+sample, `GET /api/reports/[id]` and `GET /r/[id]` read a saved report as JSON or as a
+shareable page, and `POST /api/waitlist` handles signups.
 
 ## Project layout
 
-```
-app/
-  page.tsx                     Dashboard: form, loading, results
-  r/[id]/                      Shareable read-only report page
-  api/analyze-market/          The analysis pipeline endpoint
-  api/reports/[id]/            Read a validated v2 report
-  api/sample-report/           Cached real samples (+ protected refresh)
-  api/waitlist/                Waitlist capture
-  api/health/                  Liveness endpoint
-components/                    Dashboard UI, with co-located *.test.tsx
-lib/                           The pipeline: geocoding, discovery, auditing,
-                               signals, scoring, report + PDF generation,
-                               rate limiting, robots.txt, storage, logging
-scripts/                      Operator tooling (waitlist + report-count exports,
-                               real-data gate, sample refresh)
-instrumentation.ts            Startup and captured-error logging hooks
-```
+`app/` holds the dashboard, the shareable report page (`r/[id]`), and the API routes
+(analyze, reports, samples, waitlist, health). `lib/` is the pipeline itself —
+geocoding, discovery, auditing, signals, scoring, report + PDF generation, rate
+limiting, robots.txt, storage, and logging. `components/` is the UI with co-located
+tests, and `scripts/` is operator tooling.
 
-PDF export happens client-side (`jsPDF` + `jspdf-autotable`) from the report
-data already on screen — no second backend call.
-
-Server logs are single-line JSON (`lib/logger.ts`). Every
-`/api/analyze-market` response carries an `x-request-id`, and every log line
-for that request carries the same id, propagated through AsyncLocalStorage so
-nothing has to thread a logger around. Point it at a real log provider by
-swapping the `console.*` sink in that one file.
+PDF export runs client-side (`jsPDF`) from the on-screen report — no second backend
+call. Server logs are single-line JSON, each analyze response tagged with an
+`x-request-id` that's propagated through AsyncLocalStorage and repeated on every log
+line for that request.
 
 ## Safety
 
