@@ -23,11 +23,11 @@
     "cheerio": "^1.2.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
-    "next": "16.2.10",
+    "next": "16.3.3",
     "p-limit": "^7.3.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "undici": "^7.28.0",
+    "undici": "^7.29.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -38,12 +38,12 @@
     "@types/node": "^26",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "16.3.3",
     "happy-dom": "^20.10.6",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
