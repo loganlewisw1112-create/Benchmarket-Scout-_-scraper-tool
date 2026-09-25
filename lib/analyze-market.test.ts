@@ -228,7 +228,7 @@ function discovery(
     queryPerformed: true,
     endpoint: "https://overpass-api.de/api/interpreter",
     accessedAt: "2026-07-19T09:59:00.000Z",
-    query: '[out:json][timeout:25];\n(\n  nwr["amenity"="dentist"]["name"](around:5000,30.2672,-97.7431);\n);\nout center tags 500;',
+    query: '[out:json][timeout:8];\n(\n  nwr["amenity"="dentist"]["name"](around:5000,30.2672,-97.7431);\n);\nout center tags 500;',
     radiusKm: 5,
     truncated: false,
     resolution: {
