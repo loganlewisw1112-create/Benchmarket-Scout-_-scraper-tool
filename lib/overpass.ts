@@ -1007,11 +1007,14 @@ export const OVERPASS_FAILOVER = {
   minAttemptTimeoutMs: 2_500,
   // Pause before re-trying an instance that has already failed in this run.
   sameEndpointRetryDelayMs: 1_500,
-  // Server-side [timeout:] for the query. At 10 s, loaded instances timed out
-  // city-sized queries server-side (2026-09-25); 25 s gives them room to
-  // finish. It is above the client timeout, so the client may give up first:
-  // that attempt then counts as failed, like any other timeout.
-  serverTimeoutSeconds: 25,
+  // Server-side [timeout:] for the query. Keep it short: Overpass admits
+  // queries by their declared timeout, so a busy instance turns away long
+  // ones. An A/B run against overpass-api.de on 2026-09-25 got 2 of 3
+  // answers with [timeout:8] and 0 of 3 with [timeout:25] (504, 504, 429),
+  // and a production sample refresh at 25 s failed 24 of 25 ids an hour after
+  // the old 8 s query had succeeded. The client timeout stays longer because
+  // a queued request can take ~17 s to be answered or refused.
+  serverTimeoutSeconds: 8,
 } as const;
 
 export const DEFAULT_DISCOVERY_RADIUS_METERS = 8_000;

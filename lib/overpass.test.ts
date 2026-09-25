@@ -176,8 +176,8 @@ describe("queryOverpass", () => {
     await queryOverpass("dentist", 41.88, -87.63);
 
     const query = sentQuery(fetchMock);
-    expect(OVERPASS_FAILOVER.serverTimeoutSeconds).toBe(25);
-    expect(query.startsWith("[out:json][timeout:25];")).toBe(true);
+    expect(OVERPASS_FAILOVER.serverTimeoutSeconds).toBe(8);
+    expect(query.startsWith("[out:json][timeout:8];")).toBe(true);
     expect(query).toContain(
       `nwr["amenity"="dentist"]["name"](around:8000,41.88,-87.63);`
     );
@@ -481,7 +481,7 @@ describe("queryOverpass discovery cache", () => {
       truncated: false,
     });
     expect(cached.elements).toEqual(elements);
-    expect(cached.query).toContain("[timeout:25]");
+    expect(cached.query).toContain("[timeout:8]");
   });
 
   it("queries live once the entry is older than 72 h, and caches the new answer", async () => {
