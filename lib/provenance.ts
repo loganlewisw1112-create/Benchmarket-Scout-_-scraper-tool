@@ -31,11 +31,19 @@ function canonicalKey(source: SourceReferenceInput): string {
   ].join("|");
 }
 
+const STATUS_RANK: Record<SourceReference["status"], number> = {
+  used: 2,
+  limited: 1,
+  unavailable: 0,
+};
+
 export class ProvenanceRegistry {
   private readonly accessedAt: string;
   private readonly sources: SourceReference[] = [];
   private readonly idByKey = new Map<string, SourceId>();
   private readonly idByCanonicalUrl = new Map<string, SourceId>();
+  // Every business a URL-deduplicated source was registered for.
+  private readonly businessesById = new Map<SourceId, string[]>();
 
   constructor(accessedAt: string = new Date().toISOString()) {
     this.accessedAt = accessedAt;
@@ -52,6 +60,7 @@ export class ProvenanceRegistry {
       : undefined;
     if (existingUrl) {
       this.idByKey.set(key, existingUrl);
+      this.noteBusiness(existingUrl, input.businessName);
       return existingUrl;
     }
 
@@ -64,7 +73,29 @@ export class ProvenanceRegistry {
       ...source,
       accessedAt: accessedAt ?? this.accessedAt,
     });
+    if (input.businessName?.trim()) {
+      this.businessesById.set(id, [input.businessName.trim()]);
+    }
     return id;
+  }
+
+  /**
+   * One URL registered for two different businesses (e.g. two listings whose
+   * sites redirect to one franchisor page) is one source, but it must not be
+   * attributed to whichever business happened to register it first: the
+   * entry drops its single businessName and names every business it covers.
+   */
+  private noteBusiness(id: SourceId, businessName?: string): void {
+    const name = businessName?.trim();
+    if (!name) return;
+    const names = this.businessesById.get(id) ?? [];
+    if (names.some((existing) => existing.toLowerCase() === name.toLowerCase())) return;
+    names.push(name);
+    this.businessesById.set(id, names);
+    const source = this.sources.find((candidate) => candidate.id === id);
+    if (!source || names.length < 2) return;
+    delete source.businessName;
+    source.title = `Page shared by ${names.length} businesses: ${names.join(", ")}`;
   }
 
   update(
@@ -78,7 +109,16 @@ export class ProvenanceRegistry {
   ): void {
     const source = this.sources.find((candidate) => candidate.id === id);
     if (!source) throw new Error(`Unknown provenance source ID ${id}.`);
-    Object.assign(source, patch);
+    if ((this.businessesById.get(id)?.length ?? 0) < 2) {
+      Object.assign(source, patch);
+      return;
+    }
+    // A shared source keeps its neutral attribution, and one business's
+    // failed fetch never downgrades a page another business's audit used.
+    if (patch.accessedAt !== undefined) source.accessedAt = patch.accessedAt;
+    if (patch.status !== undefined && STATUS_RANK[patch.status] > STATUS_RANK[source.status]) {
+      source.status = patch.status;
+    }
   }
 
   build(): Provenance {

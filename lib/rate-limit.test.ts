@@ -48,6 +48,18 @@ describe("checkRateLimit", () => {
   });
 });
 
+describe("checkRateLimit with a per-bucket ceiling", () => {
+  it("honors a custom maxPerWindow", () => {
+    const key = "test-custom-ceiling";
+    for (let i = 0; i < 3; i++) {
+      expect(checkRateLimit(key, T0, 3).allowed).toBe(true);
+    }
+    const blocked = checkRateLimit(key, T0, 3);
+    expect(blocked.allowed).toBe(false);
+    expect(checkRateLimit(key, T0 + WINDOW_MS, 3).remaining).toBe(2);
+  });
+});
+
 describe("checkFixedWindowRateLimit", () => {
   it("does not increase the counter for denied global attempts", () => {
     const key = "global-no-overcount";

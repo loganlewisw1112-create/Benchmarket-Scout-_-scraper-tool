@@ -1,4 +1,11 @@
-import type { AnalyzeMarketResponse, SourceId } from "./types";
+import {
+  CATEGORY_MAX_SCORES,
+  computeFinalScore,
+  countAuditOutcomes,
+  statusForPosition,
+  type CategoryKey,
+} from "./scoring";
+import type { AnalyzeMarketResponse, CompetitorReport, SourceId } from "./types";
 
 export class RealDataInvariantError extends Error {
   constructor(message: string) {
@@ -67,6 +74,7 @@ function assertFiniteScore(
   }
 }
 
+/** Scoring v1 (reports stored before summary.scoringVersion existed). */
 function expectedStatus(score: number): NonNullable<AnalyzeMarketResponse["summary"]["status"]> {
   if (score >= 80) return "leading";
   if (score >= 65) return "competitive";
@@ -98,6 +106,41 @@ const UNAVAILABLE_AUDIT_FIELDS = [
   "fetchMs",
   "websiteScore",
 ] as const;
+
+/**
+ * Score arithmetic and bounds that hold for every scoring version: each
+ * category is within its maximum, the website score is the category sum, and
+ * the final score is the published weighting of its components.
+ */
+function assertScoreArithmetic(record: CompetitorReport): void {
+  const label = `competitor ${record.id}`;
+  const breakdown = record.websiteAudit.scoreBreakdown;
+  if (record.auditStatus !== "unavailable") {
+    let sum = 0;
+    for (const [key, value] of Object.entries(breakdown)) {
+      const max = CATEGORY_MAX_SCORES[key as CategoryKey];
+      if (max === undefined) fail(`${label} scoreBreakdown.${key} is not a known category.`);
+      if (value! > max) {
+        fail(`${label} scoreBreakdown.${key} exceeds its maximum of ${max}.`);
+      }
+      sum += value!;
+    }
+    if (record.websiteAudit.websiteScore !== sum) {
+      fail(`${label} websiteScore does not equal its category sum.`);
+    }
+  }
+  if (record.finalScore !== null) {
+    const expected = computeFinalScore({
+      websiteScore: record.websiteAudit.websiteScore,
+      localPresenceScore: record.localPresenceScore,
+      momentumScore: record.signals.momentumScore,
+      riskScore: record.signals.riskScore,
+    });
+    if (expected !== record.finalScore) {
+      fail(`${label} finalScore does not match its component scores.`);
+    }
+  }
+}
 
 function canonicalUrl(url: string): string {
   try {
@@ -189,6 +232,16 @@ export function assertRealDataResponse(response: AnalyzeMarketResponse): void {
   ) {
     fail("market coordinates must be finite real coordinates.");
   }
+  if (
+    response.summary.scoringVersion !== undefined &&
+    response.summary.scoringVersion !== 2
+  ) {
+    fail("summary.scoringVersion is not a supported scoring version.");
+  }
+  // v2 reports use shared tie ranks, leave a lone scored entity unranked,
+  // exclude chain locations, and derive status from position. Reports stored
+  // before v2 keep being validated against the v1 rules they were built with.
+  const scoringV2 = response.summary.scoringVersion === 2;
   const records = [response.user, ...response.competitors];
   for (const record of records) {
     assertSourceIds(`competitor ${record.id}`, record.sourceIds, knownIds);
@@ -250,11 +303,16 @@ export function assertRealDataResponse(response: AnalyzeMarketResponse): void {
       record.signals.changeScore,
       auditAvailable
     );
+    const excludedChain = scoringV2 && record.isChain === true;
     assertFiniteScore(
       `competitor ${record.id} finalScore`,
       record.finalScore,
-      auditAvailable
+      auditAvailable && !excludedChain
     );
+    assertScoreArithmetic(record);
+    if (excludedChain && (record.finalScore !== null || record.rank !== null)) {
+      fail(`competitor ${record.id} is a chain location and must stay unscored.`);
+    }
     if (!auditAvailable) {
       if (!record.websiteAudit.skipped) {
         fail(`competitor ${record.id} unavailable audit must be marked skipped.`);
@@ -267,7 +325,10 @@ export function assertRealDataResponse(response: AnalyzeMarketResponse): void {
       if (record.rank !== null) {
         fail(`competitor ${record.id} rank must be null when unavailable.`);
       }
-    } else if (!Number.isInteger(record.rank) || record.rank! < 1) {
+    } else if (
+      !scoringV2 &&
+      (!Number.isInteger(record.rank) || record.rank! < 1)
+    ) {
       fail(`competitor ${record.id} must have a positive observed rank.`);
     }
     for (const evidence of record.websiteAudit.evidence) {
@@ -310,12 +371,47 @@ export function assertRealDataResponse(response: AnalyzeMarketResponse): void {
   }
 
   const scoredRecords = records.filter((record) => record.finalScore !== null);
-  const ranks = scoredRecords
-    .map((record) => record.rank)
-    .sort((left, right) => left! - right!);
-  ranks.forEach((rank, index) => {
-    if (rank !== index + 1) fail("Observed ranks must be unique and contiguous.");
-  });
+  if (scoringV2) {
+    // Competition ranking: rank = 1 + number of strictly higher scores, equal
+    // scores share a rank and are flagged as tied. A lone scored entity has
+    // nothing to be ranked against and stays unranked.
+    for (const record of scoredRecords) {
+      const tied = scoredRecords.some(
+        (other) => other !== record && other.finalScore === record.finalScore
+      );
+      const expectedRank =
+        scoredRecords.length < 2
+          ? null
+          : 1 +
+            scoredRecords.filter(
+              (other) => other.finalScore! > record.finalScore!
+            ).length;
+      if (record.rank !== expectedRank) {
+        fail(`competitor ${record.id} rank is inconsistent with the observed scores.`);
+      }
+      if ((record.rankTied === true) !== (expectedRank !== null && tied)) {
+        fail(`competitor ${record.id} rankTied does not match the observed scores.`);
+      }
+    }
+    if (
+      (response.summary.yourRankTied === true) !==
+      (response.user.rankTied === true)
+    ) {
+      fail("summary.yourRankTied does not match the user record.");
+    }
+  } else {
+    const ranked = [...scoredRecords].sort(
+      (left, right) => left.rank! - right.rank!
+    );
+    ranked.forEach((record, index) => {
+      if (record.rank !== index + 1) {
+        fail("Observed ranks must be unique and contiguous.");
+      }
+      if (index > 0 && record.finalScore! > ranked[index - 1].finalScore!) {
+        fail("Observed ranks must be ordered by final score.");
+      }
+    });
+  }
   if (response.summary.competitorCount !== response.competitors.length) {
     fail("summary.competitorCount does not match the real competitor records.");
   }
@@ -372,12 +468,35 @@ export function assertRealDataResponse(response: AnalyzeMarketResponse): void {
   if (response.summary.marketGap !== expectedGap) {
     fail("summary.marketGap does not match observed scores.");
   }
-  const expectedUserStatus =
-    response.user.finalScore === null
+  const expectedUserStatus = scoringV2
+    ? statusForPosition({
+        rank: response.user.rank,
+        gap:
+          response.user.finalScore === null || rawAverageFinal === null
+            ? null
+            : response.user.finalScore - rawAverageFinal,
+      })
+    : response.user.finalScore === null
       ? null
       : expectedStatus(response.user.finalScore);
   if (response.summary.status !== expectedUserStatus) {
-    fail("summary.status does not match the observed user score.");
+    fail(
+      scoringV2
+        ? "summary.status does not match the user's observed rank and market gap."
+        : "summary.status does not match the observed user score."
+    );
+  }
+  if (response.dataQuality.auditOutcomes) {
+    const expectedOutcomes = countAuditOutcomes(response.competitors);
+    for (const [key, value] of Object.entries(expectedOutcomes)) {
+      if (
+        response.dataQuality.auditOutcomes[
+          key as keyof typeof expectedOutcomes
+        ] !== value
+      ) {
+        fail(`dataQuality.auditOutcomes.${key} does not match the report records.`);
+      }
+    }
   }
   if (response.user.finalScore === null && response.competitors.length === 0) {
     fail("response contains no usable real entity evidence.");

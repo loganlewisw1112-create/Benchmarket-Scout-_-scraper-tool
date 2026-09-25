@@ -65,6 +65,47 @@ describe("BusinessForm", () => {
     });
   });
 
+  async function fillAllBut(user: ReturnType<typeof userEvent.setup>, url: string) {
+    await user.type(screen.getByPlaceholderText(PLACEHOLDERS.name), "Acme Plumbing");
+    await user.type(screen.getByPlaceholderText(PLACEHOLDERS.url), url);
+    await user.type(screen.getByPlaceholderText(PLACEHOLDERS.type), "plumbing");
+    await user.type(screen.getByPlaceholderText(PLACEHOLDERS.market), "Austin, TX");
+    await user.click(screen.getByRole("button", { name: "Analyze Market" }));
+  }
+
+  it("accepts a bare domain and submits it as https://", async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(<BusinessForm onSubmit={onSubmit} isLoading={false} />);
+
+    await fillAllBut(user, "acme.example.org");
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ businessUrl: "https://acme.example.org" })
+    );
+    expect(screen.getByLabelText("Business website")).toHaveValue(
+      "https://acme.example.org"
+    );
+  });
+
+  it("blocks an invalid website with an inline message instead of submitting", async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(<BusinessForm onSubmit={onSubmit} isLoading={false} />);
+
+    await fillAllBut(user, "not-a-valid-url-at-all");
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(/website address/);
+    expect(screen.getByLabelText("Business website")).toHaveAttribute(
+      "aria-invalid",
+      "true"
+    );
+
+    await user.type(screen.getByLabelText("Business website"), "x");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("disables the button and shows progress text while loading", () => {
     render(<BusinessForm onSubmit={vi.fn()} isLoading={true} />);
 

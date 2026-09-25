@@ -22,6 +22,9 @@
 //       keeping the earliest signup context while aggregating every non-empty
 //       feedback message from later events. Each aggregated message is labeled
 //       with the at/source/reportId context from its own event.
+//     Both keys carry a sliding 365-day TTL (WAITLIST_TTL_SECONDS in
+//     lib/store.ts), re-armed on every signup event: if no one signs up for
+//     365 days the whole waitlist expires, so export on a regular cadence.
 //
 //   Filesystem fallback (local dev/CI, no KV env set), rooted at
 //   `${CACHE_DIR ?? "./.cache"}/store/`:

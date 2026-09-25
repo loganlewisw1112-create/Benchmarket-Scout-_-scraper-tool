@@ -1,6 +1,11 @@
 @import "tailwindcss";
 
+/* The UI is light-only: every page paints hardcoded light Tailwind surfaces
+   and there are no `dark:` variants. Declaring the scheme keeps browser-drawn
+   UI (form controls, scrollbars, autofill) consistent with that instead of
+   flipping to dark chrome on dark-mode systems. */
 :root {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #171717;
 }
@@ -10,13 +15,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {

@@ -7,6 +7,12 @@ import LoadingSteps from "@/components/LoadingSteps";
 import ResultsDashboard from "@/components/ResultsDashboard";
 import ShareReport from "@/components/ShareReport";
 import WaitlistForm from "@/components/WaitlistForm";
+import { describeReportAge } from "@/components/DataQualityBanner";
+import {
+  describeApiError,
+  NETWORK_ERROR_MESSAGE,
+  readJsonBody,
+} from "@/lib/client-errors";
 import {
   getAccessKey,
   jsonHeaders,
@@ -44,80 +50,107 @@ export default function HomePage({
     setViewState("loading");
     setErrorMessage(null);
 
+    let res: Response;
     try {
-      const res = await fetch("/api/analyze-market", {
+      res = await fetch("/api/analyze-market", {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify(payload),
       });
-
-      const json = await res.json();
-
-      if (!res.ok) {
-        if (res.status === 401) setShowKey(true);
-        setErrorMessage(
-          json?.error ??
-            "Analysis failed. Please check your input and try again."
-        );
-        setViewState("error");
-        return;
-      }
-
-      setResult(json as AnalyzeMarketResponse);
-      setCurrentSampleId(null);
-      setSampleFreshness(null);
-      setViewState("results");
     } catch {
-      setErrorMessage("Could not reach the analysis service. Please try again.");
+      // No response at all: offline, DNS, or the connection dropped.
+      setErrorMessage(NETWORK_ERROR_MESSAGE);
       setViewState("error");
+      return;
     }
+
+    // A platform error page (e.g. a gateway timeout) is not JSON; that is a
+    // server-side failure, not a network one.
+    const json = await readJsonBody(res);
+
+    if (!res.ok) {
+      if (res.status === 401) setShowKey(true);
+      setErrorMessage(
+        describeApiError(
+          res.status,
+          json,
+          res.headers.get("Retry-After"),
+          "analyze"
+        )
+      );
+      setViewState("error");
+      return;
+    }
+
+    if (!json || typeof json !== "object") {
+      setErrorMessage(
+        "The analysis service returned an unreadable response. Please try again."
+      );
+      setViewState("error");
+      return;
+    }
+
+    setResult(json as AnalyzeMarketResponse);
+    setCurrentSampleId(null);
+    setSampleFreshness(null);
+    setViewState("results");
   }
 
   async function handleSampleReport() {
     setViewState("loading");
     setErrorMessage(null);
 
+    const query = currentSampleId
+      ? `?exclude=${encodeURIComponent(currentSampleId)}`
+      : "";
+    let res: Response;
     try {
-      const query = currentSampleId
-        ? `?exclude=${encodeURIComponent(currentSampleId)}`
-        : "";
-      const res = await fetch(`/api/sample-report${query}`, {
+      res = await fetch(`/api/sample-report${query}`, {
         headers: jsonHeaders(),
       });
-      const json = await res.json();
-
-      if (!res.ok) {
-        if (res.status === 401) setShowKey(true);
-        setErrorMessage(
-          json?.error ?? "Could not load a real sample report. Please try again."
-        );
-        setViewState("error");
-        return;
-      }
-
-      if (!json?.report || typeof json?.sampleId !== "string") {
-        setErrorMessage("The real sample response was incomplete. Please try again.");
-        setViewState("error");
-        return;
-      }
-
-      setResult({
-        ...(json.report as AnalyzeMarketResponse),
-        reportId: json.reportId ?? json.report.reportId,
-      });
-      setCurrentSampleId(json.sampleId);
-      setSampleFreshness(
-        json.freshness === "retained" || json.freshness === "active"
-          ? json.freshness
-          : "active"
-      );
-      setViewState("results");
     } catch {
+      setErrorMessage(NETWORK_ERROR_MESSAGE);
+      setViewState("error");
+      return;
+    }
+    const json = (await readJsonBody(res)) as {
+      report?: AnalyzeMarketResponse;
+      reportId?: string;
+      sampleId?: unknown;
+      freshness?: unknown;
+    } | null;
+
+    if (!res.ok) {
+      if (res.status === 401) setShowKey(true);
       setErrorMessage(
-        "Could not reach the real sample service. Please try again."
+        describeApiError(
+          res.status,
+          json,
+          res.headers.get("Retry-After"),
+          "sample"
+        )
       );
       setViewState("error");
+      return;
     }
+
+    if (!json?.report || typeof json.sampleId !== "string") {
+      setErrorMessage("The real sample response was incomplete. Please try again.");
+      setViewState("error");
+      return;
+    }
+
+    setResult({
+      ...json.report,
+      reportId: json.reportId ?? json.report.reportId,
+    });
+    setCurrentSampleId(json.sampleId);
+    setSampleFreshness(
+      json.freshness === "retained" || json.freshness === "active"
+        ? json.freshness
+        : "active"
+    );
+    setViewState("results");
   }
 
   function reset() {
@@ -128,6 +161,8 @@ export default function HomePage({
   }
 
   const showIntro = viewState !== "results";
+  const sampleAge =
+    sampleFreshness && result ? describeReportAge(result.generatedAt) : null;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -155,7 +190,7 @@ export default function HomePage({
               <button
                 type="button"
                 onClick={() => setShowKey((visible) => !visible)}
-                className="text-sm font-medium text-slate-500 hover:text-slate-700"
+                className="text-sm font-medium text-slate-600 hover:text-slate-800"
               >
                 {accessKey ? "Access code set" : "Access code"}
               </button>
@@ -170,7 +205,7 @@ export default function HomePage({
                 value={accessKey}
                 onChange={(event) => saveKey(event.target.value)}
                 placeholder="Paste your beta access code"
-                className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
               <button
                 type="button"
@@ -180,7 +215,7 @@ export default function HomePage({
                 Done
               </button>
             </div>
-            <p className="mx-auto mt-1 max-w-5xl text-xs text-slate-500">
+            <p className="mx-auto mt-1 max-w-5xl text-xs text-slate-600">
               This beta is gated. Paste the shared code you were given; it stays
               on this device only.
             </p>
@@ -234,7 +269,7 @@ export default function HomePage({
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                 What you get
               </p>
               <div className="mt-3 space-y-3 text-sm text-slate-600">
@@ -281,6 +316,21 @@ export default function HomePage({
 
           {viewState === "results" && result ? (
             <div className="space-y-6">
+              {sampleFreshness ? (
+                <p className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+                  <span className="font-semibold">Real sample report</span>
+                  {sampleAge ? (
+                    <>
+                      {" "}
+                      &middot; generated{" "}
+                      <time dateTime={result.generatedAt}>{sampleAge.date}</time>{" "}
+                      ({sampleAge.age})
+                    </>
+                  ) : null}
+                  . This is a saved run for another business, not your own
+                  report.
+                </p>
+              ) : null}
               <ShareReport reportId={result.reportId} />
               <ResultsDashboard
                 data={result}
@@ -297,18 +347,18 @@ export default function HomePage({
           />
         </section>
 
-        <footer className="border-t border-slate-200 pt-6 text-xs leading-relaxed text-slate-500">
-          <p className="font-medium text-slate-600">How this works</p>
+        <footer className="border-t border-slate-200 pt-6 text-xs leading-relaxed text-slate-600">
+          <p className="font-medium text-slate-700">How this works</p>
           <p className="mt-1 max-w-3xl">
             Benchmark Scout geocodes your market with Nominatim, discovers
             nearby businesses from OpenStreetMap/Overpass, audits public
             homepages for SEO/conversion/trust/content/technical signals, scans
-            for public momentum, risk, offer, and hiring language, and checks
-            GDELT for public news mentions. Sparse or unavailable evidence is
-            shown honestly as N/A; it is never filled with simulated data.
-            Every report includes its source appendix. Nothing here accesses
-            private accounts, bypasses logins, or scrapes paywalled or
-            CAPTCHA-protected content.
+            them for public momentum, risk, offer, and hiring language, and
+            checks GDELT for public news mentions when it is reachable. Sparse
+            or unavailable evidence is shown honestly as N/A; it is never
+            filled with simulated data. Every report includes its source
+            appendix. Nothing here accesses private accounts, bypasses logins,
+            or scrapes paywalled or CAPTCHA-protected content.
           </p>
           <p className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
             <a

@@ -39,7 +39,7 @@ export default function LoadingSteps() {
             </span>
             <span
               className={`text-sm ${
-                idx <= activeIndex ? "text-slate-800" : "text-slate-400"
+                idx <= activeIndex ? "text-slate-800" : "text-slate-500"
               }`}
             >
               {step}

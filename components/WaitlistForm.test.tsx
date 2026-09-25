@@ -47,4 +47,50 @@ describe("WaitlistForm", () => {
       "1000"
     );
   });
+
+  it("shows consent copy with a link to the privacy page", () => {
+    render(<WaitlistForm />);
+
+    expect(screen.getByText(/By sending, you agree/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "privacy page" })).toHaveAttribute(
+      "href",
+      "/privacy"
+    );
+    expect(screen.getByRole("button", { name: "Send" })).toHaveAttribute(
+      "aria-describedby",
+      "waitlist-consent"
+    );
+  });
+
+  it("explains a rate limit using the API code and Retry-After", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json(
+          { code: "RATE_LIMITED", error: "Too many requests." },
+          { status: 429, headers: { "Retry-After": "30" } }
+        )
+      )
+    );
+    const user = userEvent.setup();
+    render(<WaitlistForm />);
+
+    await user.type(screen.getByLabelText("Email"), "owner@example.com");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Please try again in 30 seconds."
+    );
+  });
+
+  it("reports a network failure as a connection problem", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    const user = userEvent.setup();
+    render(<WaitlistForm />);
+
+    await user.type(screen.getByLabelText("Email"), "owner@example.com");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/internet connection/);
+  });
 });

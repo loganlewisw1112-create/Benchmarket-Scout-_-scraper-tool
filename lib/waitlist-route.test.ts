@@ -155,6 +155,77 @@ describe("POST /api/waitlist", () => {
     ).toBe(429);
   });
 
+  it("rejects non-JSON and cross-site posts before touching the store", async () => {
+    const textPlain = await POST(
+      new Request("https://scout.test/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain", "x-forwarded-for": "192.0.2.60" },
+        body: JSON.stringify({ email: "plain@example.com" }),
+      })
+    );
+    expect(textPlain.status).toBe(415);
+    expect(await textPlain.json()).toMatchObject({
+      code: "UNSUPPORTED_MEDIA_TYPE",
+      error: expect.any(String),
+    });
+
+    const crossSite = await POST(
+      new Request("https://scout.test/api/waitlist", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "https://evil.example",
+          "x-forwarded-for": "192.0.2.61",
+        },
+        body: JSON.stringify({ email: "cross@example.com" }),
+      })
+    );
+    expect(crossSite.status).toBe(403);
+    expect(await crossSite.json()).toMatchObject({ code: "CROSS_SITE_REQUEST" });
+
+    await expect(
+      fs.readFile(path.join(tmpDir, "store", "waitlist-emails.json"), "utf8")
+    ).rejects.toThrow();
+  });
+
+  it("returns INVALID_REQUEST for malformed JSON and invalid emails", async () => {
+    const malformed = await POST(
+      new Request("https://scout.test/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-forwarded-for": "192.0.2.70" },
+        body: "{not json",
+      })
+    );
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({ code: "INVALID_REQUEST" });
+
+    const invalid = await POST(waitlistRequest("not-an-email", "192.0.2.71"));
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({
+      code: "INVALID_REQUEST",
+      error: expect.stringContaining("valid email"),
+    });
+  });
+
+  it("limits a single IP to the waitlist bucket (5 per minute) with RATE_LIMITED", async () => {
+    const windowStart = Math.floor(1_770_000_600_000 / WINDOW_MS) * WINDOW_MS;
+    vi.useFakeTimers();
+    vi.setSystemTime(windowStart);
+
+    for (let i = 0; i < 5; i++) {
+      const response = await POST(
+        waitlistRequest(`same-ip-${i}@example.com`, "192.0.2.80")
+      );
+      expect(response.status).toBe(200);
+    }
+    const limited = await POST(
+      waitlistRequest("same-ip-5@example.com", "192.0.2.80")
+    );
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBeTruthy();
+    expect(await limited.json()).toMatchObject({ code: "RATE_LIMITED" });
+  });
+
   it("returns a retryable 503 when configured KV fails", async () => {
     process.env.KV_REST_API_URL = "https://kv.test";
     process.env.KV_REST_API_TOKEN = "token";
@@ -166,6 +237,7 @@ describe("POST /api/waitlist", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("Retry-After")).toBe("60");
     expect(await response.json()).toMatchObject({
+      code: "STORAGE_UNAVAILABLE",
       error: expect.stringContaining("temporarily unavailable"),
     });
   });

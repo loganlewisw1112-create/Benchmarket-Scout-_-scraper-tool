@@ -42,10 +42,16 @@ export const KEYWORDS = {
     "trusted",
     "guaranteed",
   ],
+  // Momentum/risk/change/hiring lists hold only phrases that make a specific
+  // claim on their own. Generic words that appear in ordinary site copy or
+  // navigation ("featured", "new client", "unavailable", "delay",
+  // "complaint", "leadership", "manager", "jobs", "careers", "package",
+  // bare "hiring") were removed: they labelled real businesses with risk or
+  // hiring claims that the page did not make.
   momentum: [
     "award",
     "winner",
-    "featured",
+    "featured in",
     "new location",
     "grand opening",
     "expanded",
@@ -55,34 +61,31 @@ export const KEYWORDS = {
     "anniversary",
     "partnered",
     "partnership",
-    "new client",
     "best of",
     "top rated",
   ],
   risk: [
     "temporarily closed",
+    "closed temporarily",
+    "permanently closed",
     "reduced hours",
-    "apology",
-    "delayed",
-    "delay",
     "short staffed",
-    "complaint",
+    "short-staffed",
     "lawsuit",
     "closed location",
     "service disruption",
-    "unavailable",
   ],
   change: [
     "under new management",
+    "under new ownership",
     "new owner",
-    "acquired",
-    "acquisition",
+    "new ownership",
+    "acquired by",
     "merger",
+    "merged with",
     "rebrand",
+    "rebranded",
     "formerly known as",
-    "new manager",
-    "new team",
-    "leadership",
   ],
   offer: [
     "free estimate",
@@ -93,27 +96,63 @@ export const KEYWORDS = {
     "24/7",
     "guarantee",
     "discount",
-    "package",
     "bundle",
     "first month free",
   ],
   hiring: [
-    "hiring",
-    "careers",
-    "jobs",
+    "now hiring",
+    "we're hiring",
+    "we are hiring",
+    "hiring now",
     "join our team",
+    "job openings",
+    "open positions",
     "technician needed",
-    "sales rep",
     "crew leader",
-    "manager",
-    "installer",
-    "dispatcher",
   ],
 } as const;
 
+const keywordPatternCache = new Map<string, RegExp>();
+
+/**
+ * Whole-word/phrase matcher: "call" does not match "locally", "book" does not
+ * match "Facebook", "rebrand" does not match "Firebrand". A trailing plural
+ * "s" is allowed ("award" matches "awards"). Whitespace inside a phrase
+ * matches any run of whitespace.
+ */
+function keywordPattern(keyword: string): RegExp {
+  let pattern = keywordPatternCache.get(keyword);
+  if (!pattern) {
+    const body = keyword
+      .toLowerCase()
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\s+/g, "\\s+");
+    pattern = new RegExp(`(?<![a-z0-9])${body}s?(?![a-z0-9])`, "g");
+    keywordPatternCache.set(keyword, pattern);
+  }
+  pattern.lastIndex = 0;
+  return pattern;
+}
+
+function normalizeForMatching(text: string): string {
+  return text.toLowerCase().replace(/[\u2018\u2019\u02bc]/g, "'");
+}
+
+export function countKeywordMatches(
+  text: string,
+  keywords: readonly string[]
+): number {
+  const normalized = normalizeForMatching(text);
+  let count = 0;
+  for (const keyword of keywords) {
+    count += normalized.match(keywordPattern(keyword))?.length ?? 0;
+  }
+  return count;
+}
+
 function findKeywordHits(text: string, keywords: readonly string[]): string[] {
-  const lower = text.toLowerCase();
-  return keywords.filter((k) => lower.includes(k));
+  const normalized = normalizeForMatching(text);
+  return keywords.filter((k) => keywordPattern(k).test(normalized));
 }
 
 function hitsToSignals(
@@ -136,6 +175,22 @@ function hitsToSignals(
   ];
 }
 
+type SignalCategory = {
+  keywords: readonly string[];
+  label: string;
+};
+
+const SIGNAL_CATEGORIES = {
+  momentum: { keywords: KEYWORDS.momentum, label: "Momentum language detected" },
+  risk: { keywords: KEYWORDS.risk, label: "Possible risk language detected" },
+  change: {
+    keywords: KEYWORDS.change,
+    label: "Possible company change language detected",
+  },
+  offer: { keywords: KEYWORDS.offer, label: "Promotional offer language detected" },
+  hiring: { keywords: KEYWORDS.hiring, label: "Hiring-related language detected" },
+} satisfies Record<string, SignalCategory>;
+
 export function extractMomentumSignals(
   text: string,
   sourceUrl: string,
@@ -143,8 +198,8 @@ export function extractMomentumSignals(
   sourceIds: SourceId[] = []
 ): MarketSignal[] {
   return hitsToSignals(
-    findKeywordHits(text, KEYWORDS.momentum),
-    "Momentum language detected",
+    findKeywordHits(text, SIGNAL_CATEGORIES.momentum.keywords),
+    SIGNAL_CATEGORIES.momentum.label,
     sourceUrl,
     sourceType,
     sourceIds
@@ -158,8 +213,8 @@ export function extractRiskSignals(
   sourceIds: SourceId[] = []
 ): MarketSignal[] {
   return hitsToSignals(
-    findKeywordHits(text, KEYWORDS.risk),
-    "Possible risk language detected",
+    findKeywordHits(text, SIGNAL_CATEGORIES.risk.keywords),
+    SIGNAL_CATEGORIES.risk.label,
     sourceUrl,
     sourceType,
     sourceIds
@@ -173,8 +228,8 @@ export function extractChangeSignals(
   sourceIds: SourceId[] = []
 ): MarketSignal[] {
   return hitsToSignals(
-    findKeywordHits(text, KEYWORDS.change),
-    "Possible company change language detected",
+    findKeywordHits(text, SIGNAL_CATEGORIES.change.keywords),
+    SIGNAL_CATEGORIES.change.label,
     sourceUrl,
     sourceType,
     sourceIds
@@ -188,8 +243,8 @@ export function extractOfferSignals(
   sourceIds: SourceId[] = []
 ): MarketSignal[] {
   return hitsToSignals(
-    findKeywordHits(text, KEYWORDS.offer),
-    "Promotional offer language detected",
+    findKeywordHits(text, SIGNAL_CATEGORIES.offer.keywords),
+    SIGNAL_CATEGORIES.offer.label,
     sourceUrl,
     sourceType,
     sourceIds
@@ -203,60 +258,106 @@ export function extractHiringSignals(
   sourceIds: SourceId[] = []
 ): MarketSignal[] {
   return hitsToSignals(
-    findKeywordHits(text, KEYWORDS.hiring),
-    "Hiring-related language detected",
+    findKeywordHits(text, SIGNAL_CATEGORIES.hiring.keywords),
+    SIGNAL_CATEGORIES.hiring.label,
     sourceUrl,
     sourceType,
     sourceIds
   );
 }
 
-const SOCIAL_PATTERNS: Array<{
+// Exact social hosts (and their subdomains such as www./m./uk.). Substring
+// matching let "wix.com" or "fedex.com" count as an x.com profile.
+const SOCIAL_HOSTS: Array<{
   platform: keyof SocialLinks;
-  pattern: RegExp;
+  hosts: readonly string[];
 }> = [
-  { platform: "facebook", pattern: /facebook\.com\/[^\s"'<>]+/i },
-  { platform: "instagram", pattern: /instagram\.com\/[^\s"'<>]+/i },
-  { platform: "linkedin", pattern: /linkedin\.com\/[^\s"'<>]+/i },
-  { platform: "youtube", pattern: /youtube\.com\/[^\s"'<>]+/i },
-  { platform: "x", pattern: /(?:x\.com|twitter\.com)\/[^\s"'<>]+/i },
-  { platform: "tiktok", pattern: /tiktok\.com\/[^\s"'<>]+/i },
+  { platform: "facebook", hosts: ["facebook.com", "fb.com"] },
+  { platform: "instagram", hosts: ["instagram.com"] },
+  { platform: "linkedin", hosts: ["linkedin.com"] },
+  { platform: "youtube", hosts: ["youtube.com", "youtu.be"] },
+  { platform: "x", hosts: ["x.com", "twitter.com"] },
+  { platform: "tiktok", hosts: ["tiktok.com"] },
 ];
+
+// Share buttons, intent/dialog endpoints, and embeds point at a social
+// network but are not the business's own profile (e.g. facebook.com/sharer.php,
+// facebook.com/dialog/feed, twitter.com/intent/tweet, twitter.com/share,
+// linkedin.com/shareArticle, youtube.com/embed/...).
+const NON_PROFILE_PATH =
+  /^\/(?:sharer|share|sharearticle|sharing|dialog|intent|plugins|embed|home|login|cws\/share)(?:[/.?]|$)/i;
+
+function socialPlatformForUrl(href: string): keyof SocialLinks | null {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (url.pathname === "/" || url.pathname === "") return null;
+  if (NON_PROFILE_PATH.test(url.pathname)) return null;
+
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  for (const { platform, hosts } of SOCIAL_HOSTS) {
+    if (hosts.some((h) => host === h || host.endsWith(`.${h}`))) {
+      return platform;
+    }
+  }
+  return null;
+}
+
+/** True for a link to a social network host (profile or not). */
+export function isSocialNetworkUrl(href: string): boolean {
+  try {
+    const host = new URL(href).hostname.toLowerCase().replace(/\.$/, "");
+    return SOCIAL_HOSTS.some(({ hosts }) =>
+      hosts.some((h) => host === h || host.endsWith(`.${h}`))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One signal per category per site. A keyword counts once no matter how many
+ * crawled pages repeat it, so the number of pages fetched cannot inflate a
+ * score. The signal cites the first page with a hit; its sourceIds cover
+ * every page that contributed a distinct keyword.
+ */
+function aggregateSiteSignals(
+  pageTexts: PageText[],
+  category: SignalCategory
+): MarketSignal[] {
+  const hits: string[] = [];
+  const sourceIds: SourceId[] = [];
+  let firstPage: PageText | undefined;
+
+  for (const page of pageTexts) {
+    const newHits = findKeywordHits(page.text, category.keywords).filter(
+      (hit) => !hits.includes(hit)
+    );
+    if (newHits.length === 0) continue;
+    hits.push(...newHits);
+    sourceIds.push(...page.sourceIds);
+    firstPage ??= page;
+  }
+
+  if (!firstPage) return [];
+  return hitsToSignals(
+    hits,
+    category.label,
+    firstPage.url,
+    firstPage.sourceType,
+    dedupeSourceIds(sourceIds)
+  );
+}
 
 export function buildSignalScanFromPageTexts(
   pageTexts: PageText[],
   socialLinks: SocialLinks,
   auditStatus: AuditStatus
 ): SignalScan {
-  const momentumSignals: MarketSignal[] = [];
-  const riskSignals: MarketSignal[] = [];
-  const changeSignals: MarketSignal[] = [];
-  const offerSignals: MarketSignal[] = [];
-  const hiringSignals: MarketSignal[] = [];
-
-  for (const page of pageTexts) {
-    momentumSignals.push(
-      ...extractMomentumSignals(
-        page.text,
-        page.url,
-        page.sourceType,
-        page.sourceIds
-      )
-    );
-    riskSignals.push(
-      ...extractRiskSignals(page.text, page.url, page.sourceType, page.sourceIds)
-    );
-    changeSignals.push(
-      ...extractChangeSignals(page.text, page.url, page.sourceType, page.sourceIds)
-    );
-    offerSignals.push(
-      ...extractOfferSignals(page.text, page.url, page.sourceType, page.sourceIds)
-    );
-    hiringSignals.push(
-      ...extractHiringSignals(page.text, page.url, page.sourceType, page.sourceIds)
-    );
-  }
-
   return {
     auditStatus,
     newsStatus: "not_requested",
@@ -264,11 +365,11 @@ export function buildSignalScanFromPageTexts(
       pageTexts.flatMap((page) => page.sourceIds)
     ),
     socialLinks,
-    momentumSignals,
-    riskSignals,
-    changeSignals,
-    offerSignals,
-    hiringSignals,
+    momentumSignals: aggregateSiteSignals(pageTexts, SIGNAL_CATEGORIES.momentum),
+    riskSignals: aggregateSiteSignals(pageTexts, SIGNAL_CATEGORIES.risk),
+    changeSignals: aggregateSiteSignals(pageTexts, SIGNAL_CATEGORIES.change),
+    offerSignals: aggregateSiteSignals(pageTexts, SIGNAL_CATEGORIES.offer),
+    hiringSignals: aggregateSiteSignals(pageTexts, SIGNAL_CATEGORIES.hiring),
     newsSignals: [],
     momentumScore: auditStatus === "unavailable" ? null : 0,
     riskScore: auditStatus === "unavailable" ? null : 0,
@@ -280,13 +381,8 @@ export function extractSocialLinksFromHrefs(hrefs: string[]): SocialLinks {
   const links: SocialLinks = {};
 
   for (const href of hrefs) {
-    for (const { platform, pattern } of SOCIAL_PATTERNS) {
-      if (links[platform]) continue;
-      const match = href.match(pattern);
-      if (match) {
-        links[platform] = href.startsWith("http") ? href : `https://${match[0]}`;
-      }
-    }
+    const platform = socialPlatformForUrl(href);
+    if (platform && !links[platform]) links[platform] = href;
   }
 
   return links;

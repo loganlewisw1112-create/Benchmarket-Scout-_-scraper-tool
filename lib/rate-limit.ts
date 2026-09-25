@@ -40,9 +40,11 @@ function sweepExpiredFixedWindows(now: number, windowMs: number): void {
 }
 
 // `now` is injectable for deterministic tests; production callers omit it.
+// `maxPerWindow` lets each api-guard bucket set its own per-client ceiling.
 export function checkRateLimit(
   key: string,
-  now: number = Date.now()
+  now: number = Date.now(),
+  maxPerWindow: number = MAX_REQUESTS_PER_WINDOW
 ): RateLimitResult {
   sweepExpired(now);
 
@@ -52,7 +54,7 @@ export function checkRateLimit(
     windows.set(key, { windowStart: now, count: 1 });
     return {
       allowed: true,
-      remaining: MAX_REQUESTS_PER_WINDOW - 1,
+      remaining: maxPerWindow - 1,
       resetMs: WINDOW_MS,
     };
   }
@@ -60,13 +62,32 @@ export function checkRateLimit(
   entry.count += 1;
   const resetMs = WINDOW_MS - (now - entry.windowStart);
 
-  if (entry.count > MAX_REQUESTS_PER_WINDOW) {
+  if (entry.count > maxPerWindow) {
     return { allowed: false, remaining: 0, resetMs };
   }
 
   return {
     allowed: true,
-    remaining: MAX_REQUESTS_PER_WINDOW - entry.count,
+    remaining: maxPerWindow - entry.count,
+    resetMs,
+  };
+}
+
+// Read-only companion to checkRateLimit: whether `key` has already used up
+// its window, without counting an attempt.
+export function inspectRateLimit(
+  key: string,
+  now: number = Date.now(),
+  maxPerWindow: number = MAX_REQUESTS_PER_WINDOW
+): RateLimitResult {
+  const entry = windows.get(key);
+  if (!entry || now - entry.windowStart >= WINDOW_MS) {
+    return { allowed: true, remaining: maxPerWindow, resetMs: WINDOW_MS };
+  }
+  const resetMs = WINDOW_MS - (now - entry.windowStart);
+  return {
+    allowed: entry.count < maxPerWindow,
+    remaining: Math.max(0, maxPerWindow - entry.count),
     resetMs,
   };
 }

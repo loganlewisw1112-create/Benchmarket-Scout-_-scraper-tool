@@ -1,13 +1,17 @@
 import { cache } from "react";
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ResultsDashboard from "@/components/ResultsDashboard";
 import LegacyReportUnavailable from "@/components/LegacyReportUnavailable";
 import MaintenancePage from "@/components/MaintenancePage";
 import WaitlistForm from "@/components/WaitlistForm";
-import { readReportV2 } from "@/lib/store";
+import { clientKeyFromHeaders, enforceGuardForKey } from "@/lib/api-guard";
+import { isValidReportId, readReportV2 } from "@/lib/store";
 import { isMaintenanceMode } from "@/lib/maintenance";
+import { sharedReportMetadata } from "@/lib/share-metadata";
+import { SITE_NAME } from "@/lib/site";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +22,27 @@ export const dynamic = "force-dynamic";
 // component for a single request, avoiding a true double-fetch.
 const getCachedReport = cache(readReportV2);
 
-const SITE_NAME = "Benchmark Scout";
+// Shared links are public, so page views are throttled per IP in the same
+// 'reports' bucket as /api/reports/[id] (each unknown id costs KV reads).
+// cache() makes generateMetadata and the page count as one request. A
+// malformed id is a plain 404 checked before the guard, so it costs no KV.
+const guardSharedReport = cache(async () =>
+  enforceGuardForKey(clientKeyFromHeaders(await headers()), "reports")
+);
+
+function RateLimitedReport() {
+  return (
+    <main className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 py-16 text-center">
+      <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+        Too many requests
+      </h1>
+      <p className="max-w-md text-sm text-slate-600">
+        This connection has opened a lot of reports in the last minute. Please
+        wait a minute and reload the page.
+      </p>
+    </main>
+  );
+}
 
 function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
@@ -39,6 +63,21 @@ export async function generateMetadata({
   }
 
   const { id } = await params;
+  if (!isValidReportId(id)) {
+    return {
+      title: "Report not found",
+      description: `This shared ${SITE_NAME} report is unavailable or may have expired.`,
+      robots: { index: false, follow: false },
+    };
+  }
+  const guard = await guardSharedReport();
+  if (!guard.ok) {
+    return {
+      title: `Too many requests | ${SITE_NAME}`,
+      robots: { index: false, follow: false },
+    };
+  }
+
   const stored = await getCachedReport(id);
 
   if (stored.status !== "ok") {
@@ -52,18 +91,7 @@ export async function generateMetadata({
 
     const title = `Report unavailable | ${SITE_NAME}`;
     const description = `This shared ${SITE_NAME} report cannot be displayed under the current verified-source standard.`;
-    return {
-      title,
-      description,
-      robots: { index: false, follow: false },
-      openGraph: {
-        title,
-        description,
-        siteName: SITE_NAME,
-        type: "article",
-      },
-      twitter: { card: "summary", title, description },
-    };
+    return sharedReportMetadata(id, title, description);
   }
 
   const data = stored.value.report;
@@ -76,22 +104,7 @@ export async function generateMetadata({
     ? truncate(data.report.executiveSummary, 200)
     : `See how ${businessName} stacks up against local competitors in ${marketLabel}, benchmarked by ${SITE_NAME} from public web signals.`;
 
-  return {
-    title,
-    description,
-    robots: { index: false, follow: false },
-    openGraph: {
-      title,
-      description,
-      siteName: SITE_NAME,
-      type: "article",
-    },
-    twitter: {
-      card: "summary",
-      title,
-      description,
-    },
-  };
+  return sharedReportMetadata(id, title, description);
 }
 
 export default async function SharedReportPage({
@@ -100,8 +113,10 @@ export default async function SharedReportPage({
   params: Promise<{ id: string }>;
 }) {
   if (isMaintenanceMode()) return <MaintenancePage />;
-
   const { id } = await params;
+  if (!isValidReportId(id)) notFound();
+  if (!(await guardSharedReport()).ok) return <RateLimitedReport />;
+
   const stored = await getCachedReport(id);
   if (stored.status !== "ok") {
     if (stored.status === "missing") notFound();
@@ -109,7 +124,14 @@ export default async function SharedReportPage({
   }
 
   const data = stored.value.report;
-  const created = new Date(stored.value.createdAt);
+  // The observations date from the analysis itself; a cached analysis can be
+  // saved under a newer report id, so the stored createdAt would overstate
+  // freshness.
+  const generatedTime = Date.parse(data.generatedAt);
+  const generated = new Date(
+    Number.isFinite(generatedTime) ? generatedTime : stored.value.createdAt
+  );
+  const cachedAnalysis = data.dataQuality?.cacheHit === true;
   const marketLabel = data.market.label ? `${data.market.label} - ` : "";
 
   return (
@@ -123,14 +145,17 @@ export default async function SharedReportPage({
             <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
               {data.input.businessName}
             </h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-slate-600">
               {marketLabel}
               Generated{" "}
-              {created.toLocaleDateString(undefined, {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-              })}
+              <time dateTime={generated.toISOString()}>
+                {generated.toLocaleDateString(undefined, {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })}
+              </time>
+              {cachedAnalysis ? " (cached analysis)" : ""}
             </p>
           </div>
           <Link
@@ -145,7 +170,7 @@ export default async function SharedReportPage({
       <main className="mx-auto max-w-5xl space-y-6 px-6 py-8">
         <ResultsDashboard data={data} />
         <WaitlistForm source="shared-report" reportId={id} />
-        <footer className="border-t border-slate-200 pt-6 text-xs leading-relaxed text-slate-500">
+        <footer className="border-t border-slate-200 pt-6 text-xs leading-relaxed text-slate-600">
           <p>
             This is a read-only snapshot generated by Benchmark Scout from
             public web signals. Data reflects the moment the report was created

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { OG_IMAGE, SITE_NAME } from "@/lib/site";
 
 // Next.js discards a route segment's own `generateMetadata` output once that
 // segment calls `notFound()` — only this file's `metadata` export (merged
@@ -14,8 +15,10 @@ export const metadata: Metadata = {
     title: "Report not found",
     description:
       "This shared Benchmark Scout report is unavailable or may have expired.",
-    siteName: "Benchmark Scout",
+    siteName: SITE_NAME,
     type: "website",
+    // Shallow merge: this object replaces the root's, so keep its image.
+    images: [OG_IMAGE],
   },
 };
 
@@ -28,7 +31,7 @@ export default function SharedReportNotFound() {
       <h1 className="text-2xl font-bold tracking-tight text-slate-900">
         Report not found
       </h1>
-      <p className="max-w-md text-sm text-slate-500">
+      <p className="max-w-md text-sm text-slate-600">
         This link may be broken, or the report may have expired.
       </p>
       <Link

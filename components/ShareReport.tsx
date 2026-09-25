@@ -31,7 +31,7 @@ export default function ShareReport({ reportId }: { reportId?: string }) {
         <p className="text-sm font-semibold text-slate-900">
           Share this report
         </p>
-        <p className="truncate text-xs text-slate-500">{shareUrl}</p>
+        <p className="truncate text-xs text-slate-600">{shareUrl}</p>
       </div>
       <button
         type="button"

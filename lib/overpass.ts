@@ -1,3 +1,5 @@
+import { CACHE_TTL, readCacheEntry, writeCache } from "./cache";
+import { logger, serializeError } from "./logger";
 import { SourceUnavailableError } from "./pipeline-errors";
 import {
   abortableDelay,
@@ -14,9 +16,10 @@ export type OsmTagPair = [string, string];
  *   - "map":   the normalized string (whole or a word / word-pair inside it)
  *              matched a curated keyword in {@link OSM_CATEGORY_MAP}.
  *   - "probe": no keyword matched, so the remaining meaningful words are tried
- *              as literal OSM tag values across the common feature keys.
- *   - "none":  the honest floor — nothing usable to query. Callers should not
- *              fabricate competitors; they surface a valid zero-result run.
+ *              as literal OSM tag values across the common feature keys. A
+ *              probe with zero hits means "not understood", not "no rivals".
+ *   - "none":  the honest floor — nothing usable to query. Callers must not
+ *              fabricate competitors; they stop with INDUSTRY_NOT_RESOLVED.
  */
 export type ResolutionStage = "map" | "probe" | "none";
 
@@ -33,7 +36,8 @@ export interface IndustryResolution {
  * as a live map feature. Synonyms deliberately point at the same tags so token
  * matching has many entry points. This is intentionally broad (~200 keys) but
  * does NOT need to be exhaustive: the direct-tag probe (stage "probe") catches
- * the long tail without any map maintenance.
+ * the long tail without any map maintenance. An entry with an empty tag list
+ * marks a known dead end (see the end of the map).
  */
 export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
   // ---- Food & drink -------------------------------------------------------
@@ -69,6 +73,12 @@ export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
     ["amenity", "pub"],
     ["amenity", "bar"],
   ],
+  // Specific "<x> bar" venues; the bare head noun "bar" would pick pubs.
+  "sushi bar": [["amenity", "restaurant"]],
+  "oyster bar": [["amenity", "restaurant"]],
+  "espresso bar": [["amenity", "cafe"]],
+  "coffee bar": [["amenity", "cafe"]],
+  "nail bar": [["shop", "beauty"]],
   "fast food": [["amenity", "fast_food"]],
   takeaway: [["amenity", "fast_food"]],
   takeout: [["amenity", "fast_food"]],
@@ -177,8 +187,13 @@ export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
   pharmacy: [
     ["amenity", "pharmacy"],
     ["healthcare", "pharmacy"],
+    ["shop", "chemist"],
   ],
   drugstore: [
+    ["amenity", "pharmacy"],
+    ["shop", "chemist"],
+  ],
+  "drug store": [
     ["amenity", "pharmacy"],
     ["shop", "chemist"],
   ],
@@ -249,8 +264,14 @@ export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
     ["shop", "hairdresser"],
     ["shop", "beauty"],
   ],
-  barber: [["shop", "hairdresser"]],
-  "barber shop": [["shop", "hairdresser"]],
+  // Barbers are shop=hairdresser + hairdresser=barber (OSM wiki; ~16k uses on
+  // taginfo 2026-09-24). The subtag alone selects them without every salon.
+  barber: [["hairdresser", "barber"]],
+  barbers: [["hairdresser", "barber"]],
+  barbershop: [["hairdresser", "barber"]],
+  "barber shop": [["hairdresser", "barber"]],
+  barbering: [["hairdresser", "barber"]],
+  "hair removal": [["shop", "beauty"]],
   beauty: [
     ["shop", "beauty"],
     ["shop", "cosmetics"],
@@ -277,6 +298,8 @@ export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
   massage: [["shop", "massage"]],
   tattoo: [["shop", "tattoo"]],
   "tattoo parlor": [["shop", "tattoo"]],
+  "tattoo studio": [["shop", "tattoo"]],
+  "tattoo shop": [["shop", "tattoo"]],
   piercing: [["shop", "tattoo"]],
   tanning: [["shop", "beauty"]],
 
@@ -311,15 +334,21 @@ export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
     ["craft", "heating_engineer"],
   ],
   "air conditioning": [["craft", "hvac"]],
+  // Landscaping contractors are craft=gardener (wiki: "landscape gardener";
+  // ~7.5k uses on taginfo 2026-09-24);
+  // craft=landscaper is rare but unambiguous. Garden centres are plant
+  // retailers, not landscapers, and filled 6/10 slots in a live sample.
   landscaping: [
     ["craft", "gardener"],
-    ["office", "landscape_architect"],
-    ["shop", "garden_centre"],
+    ["craft", "landscaper"],
   ],
   landscaper: [
     ["craft", "gardener"],
-    ["office", "landscape_architect"],
-    ["shop", "garden_centre"],
+    ["craft", "landscaper"],
+  ],
+  landscape: [
+    ["craft", "gardener"],
+    ["craft", "landscaper"],
   ],
   gardener: [["craft", "gardener"]],
   gardening: [["craft", "gardener"]],
@@ -535,8 +564,11 @@ export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
   "shoe store": [["shop", "shoes"]],
   footwear: [["shop", "shoes"]],
   bookstore: [["shop", "books"]],
+  "book store": [["shop", "books"]],
   "book shop": [["shop", "books"]],
+  bookshop: [["shop", "books"]],
   books: [["shop", "books"]],
+  book: [["shop", "books"]],
   hardware: [
     ["shop", "hardware"],
     ["shop", "doityourself"],
@@ -628,10 +660,30 @@ export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
   "body shop": [["shop", "car_repair"]],
   collision: [["shop", "car_repair"]],
   "oil change": [["shop", "car_repair"]],
+  // Detailers: service:vehicle:detailing=yes (wiki-documented, ~380 uses) plus
+  // car washes, which commonly offer detailing. Repair shops and parts stores
+  // are a different trade.
   "auto detailing": [
-    ["shop", "car_repair"],
+    ["service:vehicle:detailing", "yes"],
     ["amenity", "car_wash"],
   ],
+  "car detailing": [
+    ["service:vehicle:detailing", "yes"],
+    ["amenity", "car_wash"],
+  ],
+  "mobile detailing": [
+    ["service:vehicle:detailing", "yes"],
+    ["amenity", "car_wash"],
+  ],
+  detailing: [
+    ["service:vehicle:detailing", "yes"],
+    ["amenity", "car_wash"],
+  ],
+  detailer: [
+    ["service:vehicle:detailing", "yes"],
+    ["amenity", "car_wash"],
+  ],
+  "car wash": [["amenity", "car_wash"]],
   "car dealer": [["shop", "car"]],
   "car dealership": [["shop", "car"]],
   dealership: [["shop", "car"]],
@@ -664,8 +716,10 @@ export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
   ],
   "fitness center": [["leisure", "fitness_centre"]],
   "health club": [["leisure", "fitness_centre"]],
-  yoga: [["leisure", "fitness_centre"]],
-  "yoga studio": [["leisure", "fitness_centre"]],
+  // Yoga studios carry sport=yoga (~7.6k uses on taginfo 2026-09-24);
+  // leisure=fitness_centre alone returned general gyms and CrossFit boxes.
+  yoga: [["sport", "yoga"]],
+  "yoga studio": [["sport", "yoga"]],
   pilates: [["leisure", "fitness_centre"]],
   crossfit: [["leisure", "fitness_centre"]],
   "personal trainer": [["leisure", "fitness_centre"]],
@@ -679,6 +733,11 @@ export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
   bowling: [["leisure", "bowling_alley"]],
   "dance studio": [["leisure", "dance"]],
   dance: [["leisure", "dance"]],
+  // Escape rooms are leisure=escape_game (OSM wiki; ~3.2k uses on taginfo
+  // 2026-09-24), not the generic amusement/sports tags.
+  "escape room": [["leisure", "escape_game"]],
+  "escape rooms": [["leisure", "escape_game"]],
+  "escape game": [["leisure", "escape_game"]],
 
   // ---- Education & childcare ----------------------------------------------
   childcare: [["amenity", "childcare"]],
@@ -732,8 +791,28 @@ export const OSM_CATEGORY_MAP: Record<string, OsmTagPair[]> = {
   "pet grooming": [["shop", "pet_grooming"]],
   "dog grooming": [["shop", "pet_grooming"]],
   groomer: [["shop", "pet_grooming"]],
+  "pet groomer": [["shop", "pet_grooming"]],
   kennel: [["amenity", "animal_boarding"]],
   "pet boarding": [["amenity", "animal_boarding"]],
+
+  // ---- Known dead ends ----------------------------------------------------
+  // Phrases whose head or modifier word would otherwise hit an unrelated
+  // category ("garage door repair" -> car repair, "cooking school" -> K-12
+  // school, "sign language interpreter" -> sign maker, "pet sitting" -> pet
+  // store). OSM has no reliable tag for these, so they resolve to nothing and
+  // the analysis stops with INDUSTRY_NOT_RESOLVED instead of benchmarking a
+  // different trade.
+  "garage door": [],
+  "sign language": [],
+  "pet sitting": [],
+  "pet sitter": [],
+  "dog walker": [],
+  "dog walking": [],
+  "swim school": [],
+  "swimming lessons": [],
+  "art school": [],
+  "cooking school": [],
+  "cooking class": [],
 };
 
 /**
@@ -811,13 +890,17 @@ function normalizeTokens(input: string): string[] {
  *
  * Stage 1 (map): the normalized whole string, then every contiguous word-pair /
  *   word-triple (longest first, "most specific wins"), then individual words are
- *   checked against {@link OSM_CATEGORY_MAP}. Stopwords are ignored for
+ *   checked against {@link OSM_CATEGORY_MAP}. Single words are tried from the
+ *   END of the phrase first, because English puts the head noun last: "pet
+ *   groomer" is a groomer, not a pet store. Stopwords are ignored for
  *   single-word matching so "family dental office" resolves via "dental".
+ *   A map entry with no tags is a known dead end and resolves to "none".
  * Stage 2 (probe): with no keyword hit, the remaining meaningful words (and the
  *   underscored phrase, e.g. "car wash" -> "car_wash") are emitted as literal
- *   values across {@link PROBE_KEYS}, catching the long tail without map upkeep.
- * Stage 3 (none): nothing meaningful to query. Tags are empty; the caller must
- *   surface a valid zero-result run rather than fabricate competitors.
+ *   values across {@link PROBE_KEYS}. These are guesses: a probe that returns
+ *   no elements means "not understood", never "no competitors".
+ * Stage 3 (none): nothing meaningful to query. The caller must stop with
+ *   INDUSTRY_NOT_RESOLVED rather than fabricate or imply an empty market.
  */
 export function resolveIndustry(businessType: string): IndustryResolution {
   const tokens = normalizeTokens(businessType);
@@ -826,27 +909,29 @@ export function resolveIndustry(businessType: string): IndustryResolution {
     return { tags: [], stage: "none", matched: null };
   }
 
+  const fromMap = (key: string): IndustryResolution => {
+    const tags = OSM_CATEGORY_MAP[key];
+    return tags.length > 0
+      ? { tags, stage: "map", matched: key }
+      : { tags: [], stage: "none", matched: key };
+  };
+
   const full = tokens.join(" ");
-  if (OSM_CATEGORY_MAP[full]) {
-    return { tags: OSM_CATEGORY_MAP[full], stage: "map", matched: full };
-  }
+  if (Object.hasOwn(OSM_CATEGORY_MAP, full)) return fromMap(full);
 
   // Contiguous multi-word phrases, longest window first (most specific wins).
   for (let window = Math.min(3, tokens.length); window >= 2; window--) {
     for (let start = 0; start + window <= tokens.length; start++) {
       const phrase = tokens.slice(start, start + window).join(" ");
-      if (OSM_CATEGORY_MAP[phrase]) {
-        return { tags: OSM_CATEGORY_MAP[phrase], stage: "map", matched: phrase };
-      }
+      if (Object.hasOwn(OSM_CATEGORY_MAP, phrase)) return fromMap(phrase);
     }
   }
 
-  // Individual, non-generic words.
-  for (const token of tokens) {
+  // Individual, non-generic words, head noun (last word) first.
+  for (let index = tokens.length - 1; index >= 0; index--) {
+    const token = tokens[index];
     if (STOPWORDS.has(token)) continue;
-    if (OSM_CATEGORY_MAP[token]) {
-      return { tags: OSM_CATEGORY_MAP[token], stage: "map", matched: token };
-    }
+    if (Object.hasOwn(OSM_CATEGORY_MAP, token)) return fromMap(token);
   }
 
   // Stage 2: direct tag probe over the meaningful words.
@@ -894,35 +979,123 @@ const USER_AGENT =
   process.env.APP_USER_AGENT ??
   "BenchmarkScout/0.1 (contact: github.com/loganlewisw1112-create/Benchmarket-Scout-_-scraper-tool)";
 
-// Use two independently operated public global instances from the current
-// OpenStreetMap community instance list. One meaningful attempt per instance
-// is more useful than several very short retries: live Alameda queries can
-// legitimately need several seconds under provider load.
-const OVERPASS_ENDPOINTS = [
+// Three independently operated public global instances from the OpenStreetMap
+// community instance list, tried in this order. maps.mail.ru is slow (a 5 km
+// cafe query took 33 s on 2026-09-25 UTC) but answered while the other two
+// returned 504s or hung, so it is the last resort rather than unused.
+export const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.private.coffee/api/interpreter",
-];
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+] as const;
 
-const ATTEMPTS_PER_ENDPOINT = 3;
-const PER_REQUEST_TIMEOUT_MS = 8_500;
-const RETRY_BACKOFF_MS = [0, 2_000, 5_000] as const;
-export const DEFAULT_DISCOVERY_RADIUS_METERS = 18_000;
+// Failover schedule. Each attempt goes to an instance not tried yet in this
+// run; only when all have failed is one retried (the one that failed longest
+// ago, after a short pause), and never one that still has an attempt in
+// flight. When nothing has answered `hedgeDelayMs` after the latest start, the
+// next instance is started in parallel (at most `maxParallelAttempts` at
+// once), so a hung instance never consumes the others' share of the stage
+// budget. A failed attempt is replaced at once.
+export const OVERPASS_FAILOVER = {
+  maxAttempts: 4,
+  maxParallelAttempts: 3,
+  hedgeDelayMs: 7_000,
+  // Per-attempt client timeout: as much of the 24 s discovery stage as one
+  // attempt can take while the hedges still get a real chance (see
+  // ANALYSIS_TIMING_BUDGETS in lib/analyze-market.ts).
+  maxAttemptTimeoutMs: 21_000,
+  minAttemptTimeoutMs: 2_500,
+  // Pause before re-trying an instance that has already failed in this run.
+  sameEndpointRetryDelayMs: 1_500,
+  // Server-side [timeout:] for the query. At 10 s, loaded instances timed out
+  // city-sized queries server-side (2026-09-25); 25 s gives them room to
+  // finish. It is above the client timeout, so the client may give up first:
+  // that attempt then counts as failed, like any other timeout.
+  serverTimeoutSeconds: 25,
+} as const;
+
+export const DEFAULT_DISCOVERY_RADIUS_METERS = 8_000;
 
 // Staged resolution (esp. the direct-tag probe) can produce many candidate tag
 // clauses. Cap them so a single Overpass request stays polite and fast; the
 // probe orders clauses most-specific-first, so the cap keeps the best guesses.
 const MAX_TAG_CLAUSES = 24;
-// Element cap in the `out` statement. Broadened queries now span several tags,
-// so we pull a slightly larger candidate pool for downstream ranking/dedupe
-// while still keeping the response small.
-const OUTPUT_LIMIT = 50;
+// Element cap in the `out` statement. Overpass returns elements in its own
+// order (type, then ascending id), not by distance, so the cap must be large
+// enough to hold every named match in the search circle; the caller sorts by
+// distance. When a response hits the cap it is flagged `truncated` so the
+// caller can narrow the radius instead of ranking an arbitrary subset.
+export const OVERPASS_OUTPUT_LIMIT = 500;
+
+/**
+ * Set when the elements came from the discovery cache instead of a live
+ * query: "fresh" is a result younger than CACHE_TTL.overpass, "stale" an
+ * older one (up to CACHE_TTL.overpassStaleIfError) used only because every
+ * live attempt failed. Either way `accessedAt` is when OpenStreetMap
+ * originally answered, never the time it was read back.
+ */
+export type OverpassCacheUse = "fresh" | "stale";
 
 export type OverpassQueryResult = {
   elements: OverpassElement[];
+  /** True when this exact query was answered by Overpass (now, or cached). */
   queryPerformed: boolean;
   endpoint?: string;
   accessedAt: string;
+  /** The exact Overpass QL that was sent, for reproducible citations. */
+  query?: string;
+  radiusMeters: number;
+  /** True when the element cap was reached, so the set may be incomplete. */
+  truncated: boolean;
+  resolution: IndustryResolution;
+  /** Absent for a live answer. */
+  cache?: OverpassCacheUse;
 };
+
+/** Overpass QL for named features matching any tag pair within the circle. */
+export function buildOverpassQuery(
+  tagPairs: OsmTagPair[],
+  lat: number,
+  lon: number,
+  radiusMeters: number
+): string {
+  const radius = Math.round(radiusMeters);
+  const clauses = tagPairs
+    .slice(0, MAX_TAG_CLAUSES)
+    .map(
+      ([key, value]) =>
+        `nwr["${key}"="${value}"]["name"](around:${radius},${lat},${lon});`
+    )
+    .join("\n  ");
+
+  return `[out:json][timeout:${OVERPASS_FAILOVER.serverTimeoutSeconds}];
+(
+  ${clauses}
+);
+out center tags ${OVERPASS_OUTPUT_LIMIT};`;
+}
+
+/**
+ * A clickable, reproducible citation for an Overpass query: overpass-turbo
+ * loads the exact query text into its editor. The bare API endpoint answers a
+ * browser GET with HTTP 406, so it is not a usable link.
+ */
+export function overpassTurboUrl(query: string): string {
+  return `https://overpass-turbo.eu/?Q=${encodeURIComponent(query)}`;
+}
+
+/**
+ * Overpass reports server-side failures (query timeout, out of memory) as an
+ * HTTP 200 JSON body whose `remark` says "runtime error", often next to an
+ * empty or truncated `elements` array. That is a failed query, not a result.
+ */
+function runtimeErrorRemark(data: object): string | null {
+  const remark = (data as { remark?: unknown }).remark;
+  if (typeof remark !== "string") return null;
+  return /runtime (error|remark)|timed out|out of memory/i.test(remark)
+    ? remark
+    : null;
+}
 
 async function fetchOverpassOnce(
   endpoint: string,
@@ -931,7 +1104,10 @@ async function fetchOverpassOnce(
 ): Promise<{ elements: OverpassElement[]; accessedAt: string }> {
   const timed = createTimedSignal(
     options.signal,
-    Math.min(PER_REQUEST_TIMEOUT_MS, options.budgetMs ?? PER_REQUEST_TIMEOUT_MS)
+    Math.min(
+      OVERPASS_FAILOVER.maxAttemptTimeoutMs,
+      options.budgetMs ?? OVERPASS_FAILOVER.maxAttemptTimeoutMs
+    )
   );
 
   try {
@@ -966,12 +1142,252 @@ async function fetchOverpassOnce(
         `Overpass (${endpoint}) returned a malformed payload without an elements array`
       );
     }
+    const remark = runtimeErrorRemark(data);
+    if (remark) {
+      throw new Error(`Overpass (${endpoint}) reported a runtime error: ${remark}`);
+    }
     return {
       elements: (data as { elements: OverpassElement[] }).elements,
       accessedAt: new Date().toISOString(),
     };
   } finally {
     timed.cleanup();
+  }
+}
+
+type AttemptOutcome =
+  | {
+      id: number;
+      ok: true;
+      endpoint: string;
+      value: { elements: OverpassElement[]; accessedAt: string; endpoint: string };
+    }
+  | { id: number; ok: false; error: unknown; endpoint: string };
+
+/**
+ * Run one query against the instance pool with hedged attempts across
+ * distinct instances (see OVERPASS_FAILOVER), all inside the caller's
+ * deadline. Resolves with the first successful response and aborts every
+ * other in-flight attempt.
+ */
+async function fetchWithFailover(
+  query: string,
+  deadlineAt: number,
+  parentSignal?: AbortSignal
+): Promise<{ elements: OverpassElement[]; accessedAt: string; endpoint: string }> {
+  const {
+    maxAttempts,
+    maxParallelAttempts,
+    hedgeDelayMs,
+    maxAttemptTimeoutMs,
+    minAttemptTimeoutMs,
+    sameEndpointRetryDelayMs,
+  } = OVERPASS_FAILOVER;
+  const stage = new AbortController();
+  const abortFromParent = () => stage.abort(parentSignal?.reason);
+  if (parentSignal?.aborted) abortFromParent();
+  else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+
+  const inflight = new Map<number, Promise<AttemptOutcome>>();
+  // Instances with an attempt in flight, and when each one last failed.
+  const busy = new Set<string>();
+  const failedAt = new Map<string, number>();
+  let launched = 0;
+  let lastError: unknown;
+  // When the next attempt is due: at once at the start and after a failure,
+  // otherwise one hedge delay after the latest start.
+  let dueAt = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  // An untried instance first (list order); otherwise the idle one that
+  // failed longest ago. Undefined when every instance is busy.
+  const pickEndpoint = (): string | undefined => {
+    const idle = OVERPASS_ENDPOINTS.filter((endpoint) => !busy.has(endpoint));
+    return (
+      idle.find((endpoint) => !failedAt.has(endpoint)) ??
+      idle.sort((left, right) => failedAt.get(left)! - failedAt.get(right)!)[0]
+    );
+  };
+
+  const launch = (endpoint: string): void => {
+    const id = launched++;
+    busy.add(endpoint);
+    dueAt = Date.now() + hedgeDelayMs;
+    const budgetMs = Math.min(maxAttemptTimeoutMs, remainingBudgetMs(deadlineAt));
+    inflight.set(
+      id,
+      fetchOverpassOnce(endpoint, query, { signal: stage.signal, budgetMs }).then(
+        (value): AttemptOutcome => ({
+          id,
+          ok: true,
+          endpoint,
+          value: { ...value, endpoint },
+        }),
+        (error: unknown): AttemptOutcome => ({ id, ok: false, error, endpoint })
+      )
+    );
+  };
+
+  try {
+    for (;;) {
+      const endpoint =
+        launched < maxAttempts &&
+        inflight.size < maxParallelAttempts &&
+        !stage.signal.aborted
+          ? pickEndpoint()
+          : undefined;
+      const retryAt =
+        endpoint === undefined || !failedAt.has(endpoint)
+          ? -Infinity
+          : failedAt.get(endpoint)! + sameEndpointRetryDelayMs;
+      const startAt = Math.max(dueAt, retryAt);
+      // An attempt that would get less than the minimum is not worth starting.
+      const launchable =
+        endpoint !== undefined && deadlineAt - startAt >= minAttemptTimeoutMs;
+      const waitMs = startAt - Date.now();
+
+      if (launchable && waitMs <= 0) {
+        launch(endpoint);
+        continue;
+      }
+      if (inflight.size === 0) {
+        if (!launchable) break;
+        // Only a retry pause stands between us and the next attempt.
+        await abortableDelay(waitMs, stage.signal);
+        if (stage.signal.aborted) break;
+        launch(endpoint);
+        continue;
+      }
+      const racers: Array<Promise<AttemptOutcome | "due">> = [...inflight.values()];
+      if (launchable) {
+        racers.push(
+          new Promise<"due">((resolve) => {
+            timer = setTimeout(() => resolve("due"), waitMs);
+          })
+        );
+      }
+      const next = await Promise.race(racers);
+      clearTimeout(timer);
+      if (next === "due") {
+        // Nothing settled meanwhile, so the chosen instance is still right.
+        if (launchable) launch(endpoint);
+        continue;
+      }
+      inflight.delete(next.id);
+      busy.delete(next.endpoint);
+      if (next.ok) return next.value;
+      lastError = next.error;
+      failedAt.set(next.endpoint, Date.now());
+      dueAt = Date.now();
+    }
+    throw (
+      lastError ??
+      parentSignal?.reason ??
+      new Error("Overpass time budget exhausted")
+    );
+  } finally {
+    clearTimeout(timer);
+    stage.abort(new Error("Overpass attempt superseded"));
+    parentSignal?.removeEventListener("abort", abortFromParent);
+  }
+}
+
+// ---- discovery cache ------------------------------------------------------
+
+type CachedOverpassResult = {
+  /** The exact query text, re-checked on read so keys can never collide. */
+  query: string;
+  endpoint: string;
+  /** When OpenStreetMap answered: the data's real retrieval time. */
+  accessedAt: string;
+  truncated: boolean;
+  elements: OverpassElement[];
+};
+
+/** Cache key for one query: the exact query text, versioned. */
+export function overpassCacheKey(query: string): string {
+  return `v1:${query}`;
+}
+
+function pointOf(element: OverpassElement): boolean {
+  return (
+    (element.lat ?? element.center?.lat) !== undefined &&
+    (element.lon ?? element.center?.lon) !== undefined
+  );
+}
+
+/**
+ * Only what discovery reads: named, located elements with their id, position
+ * and full tag set (tag values feed category matching, so none are dropped).
+ * `truncated` is stored separately, so dropping unusable elements cannot
+ * change it.
+ */
+function cacheableElements(elements: OverpassElement[]): OverpassElement[] {
+  return elements.flatMap((element) => {
+    if (!element.tags?.name?.trim() || !pointOf(element)) return [];
+    return [
+      {
+        type: element.type,
+        id: element.id,
+        ...(element.lat !== undefined ? { lat: element.lat } : {}),
+        ...(element.lon !== undefined ? { lon: element.lon } : {}),
+        ...(element.center
+          ? { center: { lat: element.center.lat, lon: element.center.lon } }
+          : {}),
+        tags: element.tags,
+      },
+    ];
+  });
+}
+
+function isCachedOverpassResult(
+  value: unknown,
+  query: string
+): value is CachedOverpassResult {
+  if (!value || typeof value !== "object") return false;
+  const cached = value as Partial<CachedOverpassResult>;
+  return (
+    cached.query === query &&
+    typeof cached.endpoint === "string" &&
+    typeof cached.accessedAt === "string" &&
+    Number.isFinite(Date.parse(cached.accessedAt)) &&
+    typeof cached.truncated === "boolean" &&
+    Array.isArray(cached.elements) &&
+    cached.elements.every(
+      (element) =>
+        element &&
+        typeof element === "object" &&
+        typeof element.type === "string" &&
+        typeof element.id === "number"
+    )
+  );
+}
+
+/** The cached answer to this exact query, with its age, or null (fails open). */
+async function readDiscoveryCache(
+  query: string
+): Promise<{ result: CachedOverpassResult; ageMs: number } | null> {
+  try {
+    const entry = await readCacheEntry<unknown>("overpass", overpassCacheKey(query));
+    if (!entry || !isCachedOverpassResult(entry.data, query)) return null;
+    // Age of the data itself (when OpenStreetMap answered), not of the write.
+    const ageMs = Date.now() - Date.parse(entry.data.accessedAt);
+    return ageMs <= CACHE_TTL.overpassStaleIfError
+      ? { result: entry.data, ageMs }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeDiscoveryCache(result: CachedOverpassResult): Promise<void> {
+  try {
+    await writeCache<CachedOverpassResult>("overpass", overpassCacheKey(result.query), {
+      ...result,
+      elements: cacheableElements(result.elements),
+    });
+  } catch {
+    // Never fail discovery over a cache write.
   }
 }
 
@@ -982,73 +1398,77 @@ export async function queryOverpassDetailed(
   radiusMeters = DEFAULT_DISCOVERY_RADIUS_METERS,
   options: RequestBudgetOptions = {}
 ): Promise<OverpassQueryResult> {
-  const deadlineAt = Date.now() + (options.budgetMs ?? 18_000);
-  const tagPairs = resolveOsmTags(businessType);
+  const deadlineAt = Date.now() + (options.budgetMs ?? 24_000);
+  const resolution = resolveIndustry(businessType);
 
   // Honest floor: nothing resolved to a live OSM tag, so there is nothing to
-  // query. Return no elements rather than firing a near-dead `shop=yes` query;
-  // the caller then records a valid zero-result discovery.
-  if (tagPairs.length === 0) {
+  // query. The caller stops with INDUSTRY_NOT_RESOLVED; no request is made.
+  if (resolution.tags.length === 0) {
     return {
       elements: [],
       queryPerformed: false,
       accessedAt: new Date().toISOString(),
+      radiusMeters,
+      truncated: false,
+      resolution,
     };
   }
 
-  const clauses = tagPairs
-    .slice(0, MAX_TAG_CLAUSES)
-    .map(
-      ([key, value]) =>
-        `nwr["${key}"="${value}"](around:${radiusMeters},${lat},${lon});`
-    )
-    .join("\n  ");
+  // The cache key is the exact query text, so a different center, radius or
+  // tag set can never be served another query's answer.
+  const query = buildOverpassQuery(resolution.tags, lat, lon, radiusMeters);
+  const cached = await readDiscoveryCache(query);
+  const fromCache = (
+    entry: CachedOverpassResult,
+    use: OverpassCacheUse
+  ): OverpassQueryResult => ({
+    elements: entry.elements,
+    queryPerformed: true,
+    endpoint: entry.endpoint,
+    accessedAt: entry.accessedAt,
+    query,
+    radiusMeters,
+    truncated: entry.truncated,
+    resolution,
+    cache: use,
+  });
 
-  const query = `[out:json][timeout:${Math.floor(PER_REQUEST_TIMEOUT_MS / 1000)}];
-(
-  ${clauses}
-);
-out center tags ${OUTPUT_LIMIT};`;
-
-  let lastError: unknown;
-
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    for (let attempt = 1; attempt <= ATTEMPTS_PER_ENDPOINT; attempt++) {
-      const remaining = remainingBudgetMs(deadlineAt);
-      if (options.signal?.aborted || remaining === 0) {
-        lastError =
-          options.signal?.reason ?? new Error("Overpass time budget exhausted");
-        break;
-      }
-      const backoffMs = RETRY_BACKOFF_MS[attempt - 1] ?? 5_000;
-      if (backoffMs > 0) {
-        if (backoffMs >= remaining) {
-          lastError = new Error("Overpass time budget exhausted");
-          break;
-        }
-        await abortableDelay(backoffMs, options.signal);
-      }
-      try {
-        const result = await fetchOverpassOnce(endpoint, query, {
-          signal: options.signal,
-          budgetMs: remainingBudgetMs(deadlineAt),
-        });
-        return {
-          ...result,
-          queryPerformed: true,
-          endpoint,
-        };
-      } catch (err) {
-        lastError = err;
-      }
-    }
+  if (cached && cached.ageMs <= CACHE_TTL.overpass) {
+    logger.info("Overpass discovery served from cache", {
+      accessedAt: cached.result.accessedAt,
+    });
+    return fromCache(cached.result, "fresh");
   }
 
-  throw new SourceUnavailableError(
-    "overpass",
-    "Competitor discovery is temporarily unavailable.",
-    lastError
-  );
+  try {
+    const result = await fetchWithFailover(query, deadlineAt, options.signal);
+    const truncated = result.elements.length >= OVERPASS_OUTPUT_LIMIT;
+    await writeDiscoveryCache({ ...result, query, truncated });
+    return {
+      ...result,
+      queryPerformed: true,
+      query,
+      radiusMeters,
+      truncated,
+      resolution,
+    };
+  } catch (err) {
+    // Stale-if-error: an older answer to this exact query beats no answer,
+    // as long as the report says when it was retrieved (see analyze-market).
+    // It is never re-saved, so it cannot pass itself off as fresh later.
+    if (cached) {
+      logger.warn("Overpass unavailable; using a stale cached discovery result", {
+        accessedAt: cached.result.accessedAt,
+        ...serializeError(err),
+      });
+      return fromCache(cached.result, "stale");
+    }
+    throw new SourceUnavailableError(
+      "overpass",
+      "Competitor discovery is temporarily unavailable.",
+      err
+    );
+  }
 }
 
 export async function queryOverpass(

@@ -1,0 +1,15 @@
+Noto Sans (Regular 400, Bold 700), used only by the client-side PDF export
+(lib/pdf.ts, lib/pdf-text.ts) when a report contains text outside WinAnsi.
+
+Source:  npm package @expo-google-fonts/noto-sans@0.4.2
+         package/400Regular/NotoSans_400Regular.ttf -> NotoSans-Regular.ttf
+         package/700Bold/NotoSans_700Bold.ttf        -> NotoSans-Bold.ttf
+License: SIL Open Font License 1.1 (see OFL.txt, copied from the package's
+         LICENSE_FONT). Copyright 2022 The Noto Project Authors.
+
+sha256:
+fe8c022f48d8dd29f17b744d16f9346f4357e16f7d4f7be58b000ae7c291b614  NotoSans-Regular.ttf
+13a813c49624ae3ba3c5c6e72c5ebffc4b9e1e6ea32f421c04069b037c6ad431  NotoSans-Bold.ttf
+
+The coverage table in lib/pdf-text.ts was extracted from these exact files.
+Regenerate it if the fonts are ever replaced.

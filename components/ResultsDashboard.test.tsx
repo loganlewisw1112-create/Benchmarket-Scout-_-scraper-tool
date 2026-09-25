@@ -279,7 +279,7 @@ describe("ResultsDashboard", () => {
 
     expect(screen.getByText("Rival Dental (discovered only)")).toBeInTheDocument();
     expect(
-      screen.getByText("Discovered; website audit unavailable")
+      screen.getByText("Discovered; no website listed")
     ).toBeInTheDocument();
     expect(screen.getAllByText("N/A").length).toBeGreaterThan(4);
   });
@@ -294,10 +294,74 @@ describe("ResultsDashboard", () => {
     expect(screen.getByText("Austin dentist discovery")).toBeInTheDocument();
     expect(screen.getByText("Verify Dental homepage")).toBeInTheDocument();
     expect(
-      screen.getByRole("link", {
-        name: "https://verify-dental.example.org/",
-      })
+      screen.getByRole("link", { name: "verify-dental.example.org" })
     ).toHaveAttribute("href", "https://verify-dental.example.org/");
+    // The Overpass endpoint is queried by POST, so it is not rendered as a
+    // dead link.
+    expect(
+      screen.getByText(/Overpass query sent as a POST request; no direct link/)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /overpass-api\.de/ })
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the OpenStreetMap attribution wherever OSM competitors are listed", () => {
+    render(<ResultsDashboard data={buildResponse()} />);
+
+    const links = screen.getAllByRole("link", {
+      name: "Map data © OpenStreetMap contributors",
+    });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link).toHaveAttribute(
+        "href",
+        "https://www.openstreetmap.org/copyright"
+      );
+    }
+  });
+
+  it("renders per-category scores with the audit evidence behind them", () => {
+    render(<ResultsDashboard data={buildResponse()} />);
+
+    expect(screen.getByText("Website score by category")).toBeInTheDocument();
+    expect(screen.getByText("18/25")).toBeInTheDocument();
+    expect(screen.getByText("a linked services page")).toBeInTheDocument();
+    expect(screen.getAllByText("Not found:").length).toBeGreaterThan(0);
+  });
+
+  it("shows the report's age and an explicit empty action-plan statement", () => {
+    const data = buildResponse();
+    data.recommendations = [];
+    data.report.actionPlan = [];
+    data.report.actionPlanNote =
+      "No material gaps found: your homepage audit showed every element this report checks.";
+    render(
+      <ResultsDashboard
+        data={data}
+        sampleFreshness="retained"
+        now={Date.parse("2026-07-24T09:00:00.000Z")}
+      />
+    );
+
+    expect(screen.getAllByText(/5 days ago/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/just older than 72 hours/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/^No material gaps found/)).toHaveLength(2);
+  });
+
+  it("puts the market-position finding in the on-screen top three", () => {
+    const data = buildResponse();
+    const category = data.report.topFindings[0];
+    data.report.topFindings = [
+      { ...category, title: "SEO gap" },
+      { ...category, title: "Trust gap" },
+      { ...category, title: "Content gap" },
+      { ...category, title: "Observed market position" },
+    ];
+    render(<ResultsDashboard data={data} />);
+
+    expect(screen.getByText("Observed market position:")).toBeInTheDocument();
+    expect(screen.queryByText("Content gap:")).not.toBeInTheDocument();
   });
 
   it("describes the report as real-only and never claims fallback data", () => {

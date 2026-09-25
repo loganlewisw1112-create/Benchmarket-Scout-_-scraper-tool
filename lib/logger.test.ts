@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRequestLogger,
   getCurrentRequestId,
+  isUserCausedError,
   logger,
+  logLevelForError,
   serializeError,
   withRequestId,
 } from "./logger";
@@ -162,5 +164,79 @@ describe("serializeError", () => {
   it("captures a digest property on a non-Error object", () => {
     const result = serializeError({ digest: "xyz789", other: "field" });
     expect(result.digest).toBe("xyz789");
+  });
+});
+
+describe("serializeError typed fields and cause chain", () => {
+  class FakePipelineError extends Error {
+    readonly code = "SOURCE_UNAVAILABLE";
+    readonly status = 503;
+    readonly source = "overpass";
+    readonly retryable = true;
+  }
+
+  it("copies pipeline code/status/source/retryable and the cause chain", () => {
+    const root = Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" });
+    const middle = new Error("fetch failed", { cause: root });
+    const err = new FakePipelineError("Competitor discovery is temporarily unavailable.", {
+      cause: middle,
+    });
+    expect(serializeError(err)).toMatchObject({
+      errorMessage: "Competitor discovery is temporarily unavailable.",
+      code: "SOURCE_UNAVAILABLE",
+      status: 503,
+      source: "overpass",
+      retryable: true,
+      cause: {
+        errorMessage: "fetch failed",
+        errorName: "Error",
+        cause: { errorMessage: "connect ETIMEDOUT", code: "ETIMEDOUT" },
+      },
+    });
+  });
+
+  it("limits the cause chain to depth 3 and omits cause stacks", () => {
+    let err: Error = new Error("level 5");
+    for (let level = 4; level >= 0; level--) {
+      err = new Error(`level ${level}`, { cause: err });
+    }
+    const result = serializeError(err);
+    expect(result.cause?.errorMessage).toBe("level 1");
+    expect(result.cause?.cause?.errorMessage).toBe("level 2");
+    expect(result.cause?.cause?.cause?.errorMessage).toBe("level 3");
+    expect(result.cause?.cause?.cause?.cause).toBeUndefined();
+    expect(JSON.stringify(result.cause)).not.toContain("stack");
+  });
+
+  it("redacts email addresses from messages, stacks, and causes", () => {
+    const err = new Error("Signup failed for jane.doe@example.com", {
+      cause: new Error("duplicate jane.doe@example.com"),
+    });
+    const json = JSON.stringify(serializeError(err));
+    expect(json).not.toContain("jane.doe@example.com");
+    expect(json).toContain("[redacted-email]");
+  });
+
+  it("does not copy arbitrary own properties", () => {
+    const err = Object.assign(new Error("x"), { email: "a@b.co", body: "secret" });
+    const json = JSON.stringify(serializeError(err));
+    expect(json).not.toContain("secret");
+    expect(json).not.toContain("a@b.co");
+  });
+});
+
+describe("logLevelForError", () => {
+  it("logs user-caused failures at warn", () => {
+    expect(logLevelForError(Object.assign(new Error("x"), { code: "MARKET_NOT_FOUND", status: 422 }))).toBe("warn");
+    expect(logLevelForError(Object.assign(new Error("x"), { status: 400 }))).toBe("warn");
+    expect(logLevelForError(Object.assign(new Error("x"), { name: "ZodError" }))).toBe("warn");
+    expect(isUserCausedError({ code: "INVALID_REQUEST" })).toBe(true);
+  });
+
+  it("keeps faults and upstream outages at error", () => {
+    expect(logLevelForError(new Error("boom"))).toBe("error");
+    expect(logLevelForError(Object.assign(new Error("x"), { code: "SOURCE_UNAVAILABLE", status: 503 }))).toBe("error");
+    expect(logLevelForError("string")).toBe("error");
+    expect(logLevelForError(null)).toBe("error");
   });
 });

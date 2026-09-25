@@ -1,4 +1,6 @@
 import { Fragment } from "react";
+import { OSM_ATTRIBUTION, OSM_COPYRIGHT_URL } from "@/lib/site";
+import { describeSourceUrl } from "@/lib/source-url";
 import type { SourceId, SourceReference } from "@/lib/types";
 
 export function CitationMarkers({
@@ -40,11 +42,51 @@ function safeSourceUrl(url: string | undefined): string | undefined {
   }
 }
 
+// Re-exported so existing imports keep working; the PDF uses the same helper.
+export { describeSourceUrl };
+
+/** "2026-09-22 14:04 UTC" for ISO timestamps; other strings pass through. */
+function formatAccessTime(value: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::[\d.]+)?Z$/.exec(value);
+  return match ? `${match[1]} ${match[2]} UTC` : value;
+}
+
+function SourceUrlCell({ url }: { url: string | undefined }) {
+  const sourceUrl = safeSourceUrl(url);
+  if (!sourceUrl) return <>{url ?? "N/A"}</>;
+  const { domain, detail, linkable } = describeSourceUrl(sourceUrl);
+  if (!linkable) {
+    return (
+      <span>
+        <span className="font-medium">{domain}</span>
+        <span className="mt-0.5 block text-[11px] text-slate-600">{detail}</span>
+      </span>
+    );
+  }
+  return (
+    <a
+      href={sourceUrl}
+      title={sourceUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="text-indigo-700 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-900"
+    >
+      <span className="font-medium">{domain}</span>
+      {detail ? (
+        <span className="mt-0.5 block text-[11px]">{detail}</span>
+      ) : null}
+    </a>
+  );
+}
+
 export default function SourcesAppendix({
   sources,
 }: {
   sources: readonly SourceReference[];
 }) {
+  const usesOpenStreetMap = sources.some(
+    (source) => source.kind === "openstreetmap" || source.kind === "nominatim"
+  );
   return (
     <section
       aria-labelledby="sources-appendix-title"
@@ -56,14 +98,14 @@ export default function SourcesAppendix({
       >
         Sources Appendix
       </h3>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-slate-600">
         Every source captured with this report. Citation markers above map to
         these stable source IDs.
       </p>
 
       <div className="mt-4 overflow-x-auto">
         <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-          <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
             <tr>
               <th className="px-3 py-2">ID</th>
               <th className="px-3 py-2">Provider</th>
@@ -74,52 +116,55 @@ export default function SourcesAppendix({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-slate-700">
-            {sources.map((source) => {
-              const sourceUrl = safeSourceUrl(source.url);
-              return (
-                <tr key={source.id}>
-                  <td className="whitespace-nowrap px-3 py-2 font-semibold text-indigo-700">
-                    [{source.id}]
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    {source.provider}
-                  </td>
-                  <td className="min-w-48 px-3 py-2">
-                    <span>{source.businessName ?? source.title}</span>
-                    {source.businessName && source.title !== source.businessName && (
-                      <span className="mt-0.5 block text-[11px] text-slate-500">
-                        {source.title}
-                      </span>
-                    )}
-                  </td>
-                  <td className="max-w-72 break-all px-3 py-2">
-                    {sourceUrl ? (
-                      <a
-                        href={sourceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-indigo-600 underline decoration-indigo-200 underline-offset-2 hover:text-indigo-800"
-                      >
-                        {sourceUrl}
-                      </a>
-                    ) : (
-                      source.url ?? "N/A"
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2">
-                    <time dateTime={source.accessedAt}>
-                      {source.accessedAt}
-                    </time>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-2 capitalize">
-                    {source.status}
-                  </td>
-                </tr>
-              );
-            })}
+            {sources.map((source) => (
+              <tr key={source.id}>
+                <td className="whitespace-nowrap px-3 py-2 font-semibold text-indigo-700">
+                  [{source.id}]
+                </td>
+                <td className="whitespace-nowrap px-3 py-2">
+                  {source.provider}
+                </td>
+                <td className="min-w-48 px-3 py-2">
+                  <span>{source.businessName ?? source.title}</span>
+                  {source.businessName && source.title !== source.businessName && (
+                    <span className="mt-0.5 block text-[11px] text-slate-600">
+                      {source.title}
+                    </span>
+                  )}
+                </td>
+                <td className="max-w-72 break-words px-3 py-2">
+                  <SourceUrlCell url={source.url} />
+                </td>
+                <td className="whitespace-nowrap px-3 py-2">
+                  <time dateTime={source.accessedAt}>
+                    {formatAccessTime(source.accessedAt)}
+                  </time>
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 capitalize">
+                  {source.status}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+      {usesOpenStreetMap ? <OsmAttribution className="mt-3" /> : null}
     </section>
+  );
+}
+
+/** Visible ODbL attribution for OpenStreetMap-derived data. */
+export function OsmAttribution({ className = "" }: { className?: string }) {
+  return (
+    <p className={`text-xs text-slate-600 ${className}`.trim()}>
+      <a
+        href={OSM_COPYRIGHT_URL}
+        target="_blank"
+        rel="noreferrer"
+        className="underline decoration-slate-400 underline-offset-2 hover:text-slate-900"
+      >
+        {OSM_ATTRIBUTION}
+      </a>
+    </p>
   );
 }

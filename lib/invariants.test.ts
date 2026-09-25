@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assertRealDataResponse, RealDataInvariantError } from "./invariants";
 import type {
   AnalyzeMarketResponse,
+  CompetitorReport,
   Recommendation,
   WebsiteAudit,
 } from "./types";
@@ -137,7 +138,8 @@ function minimalResponse(): AnalyzeMarketResponse {
         riskScore: 0,
         changeScore: 0,
       },
-      finalScore: 55,
+      // 0.6 * 50 + 0.2 * 50 + 0.15 * 0 + 0.05 * (100 - 0)
+      finalScore: 45,
       rank: 1,
     },
     competitors: [],
@@ -298,11 +300,136 @@ describe("assertRealDataResponse", () => {
     );
   });
 
+  it("rejects score arithmetic that does not reconcile or exceeds category bounds", () => {
+    const overMax = cloneResponse();
+    overMax.user.websiteAudit.scoreBreakdown.technical = 99;
+    expect(() => assertRealDataResponse(overMax)).toThrow(/exceeds its maximum/);
+
+    const badSum = cloneResponse();
+    badSum.user.websiteAudit.websiteScore = 60;
+    expect(() => assertRealDataResponse(badSum)).toThrow(/category sum/);
+
+    const badFinal = cloneResponse();
+    badFinal.user.finalScore = 100;
+    expect(() => assertRealDataResponse(badFinal)).toThrow(
+      /finalScore does not match its component scores/
+    );
+  });
+
   it("uses the dedicated invariant error type", () => {
     const response = cloneResponse();
     response.provenance.sources = [];
     expect(() => assertRealDataResponse(response)).toThrow(
       RealDataInvariantError
     );
+  });
+});
+
+// Scoring v2: the user (45) ties "Rival" (45) for #2 behind "Leader" (55).
+function v2Response(): AnalyzeMarketResponse {
+  const response = cloneResponse();
+  const competitor = (id: string, localPresenceScore: number, finalScore: number) => {
+    const record = JSON.parse(JSON.stringify(response.user)) as CompetitorReport;
+    return {
+      ...record,
+      id,
+      name: id,
+      source: "overpass" as const,
+      sourceIds: ["S3" as const],
+      localPresenceScore,
+      finalScore,
+    };
+  };
+  const leader = { ...competitor("leader", 100, 55), rank: 1 };
+  const rival = { ...competitor("rival", 50, 45), rank: 2, rankTied: true };
+  response.user.rank = 2;
+  response.user.rankTied = true;
+  response.competitors = [leader, rival];
+  response.summary = {
+    competitorCount: 2,
+    auditedCompetitorCount: 2,
+    competitorAverageWebsiteScore: 50,
+    competitorAverageFinalScore: 50,
+    yourRank: 2,
+    marketGap: -5,
+    status: "behind but recoverable",
+    scoringVersion: 2,
+    yourRankTied: true,
+  };
+  response.dataQuality.realCompetitorsFound = 2;
+  response.dataQuality.scoredCompetitors = 2;
+  return response;
+}
+
+describe("assertRealDataResponse scoring v2", () => {
+  it("accepts shared tie ranks and a position-derived status", () => {
+    expect(() => assertRealDataResponse(v2Response())).not.toThrow();
+  });
+
+  it("rejects a tie broken against the user by id", () => {
+    const response = v2Response();
+    response.user.rank = 3;
+    delete response.user.rankTied;
+    delete response.competitors[1].rankTied;
+    response.summary.yourRank = 3;
+    delete response.summary.yourRankTied;
+    expect(() => assertRealDataResponse(response)).toThrow(
+      /rank is inconsistent with the observed scores/
+    );
+  });
+
+  it("still accepts reports stored with v1 strict ranks and score bands", () => {
+    const response = v2Response();
+    response.user.rank = 3;
+    delete response.user.rankTied;
+    delete response.competitors[1].rankTied;
+    response.summary.yourRank = 3;
+    delete response.summary.yourRankTied;
+    delete response.summary.scoringVersion;
+    expect(() => assertRealDataResponse(response)).not.toThrow();
+
+    const inverted = JSON.parse(JSON.stringify(response)) as AnalyzeMarketResponse;
+    inverted.user.rank = 1;
+    inverted.competitors[0].rank = 3;
+    inverted.summary.yourRank = 1;
+    expect(() => assertRealDataResponse(inverted)).toThrow(/ordered by final score/);
+  });
+
+  it("rejects a status that contradicts the user's rank and gap", () => {
+    const response = v2Response();
+    response.summary.status = "competitive";
+    expect(() => assertRealDataResponse(response)).toThrow(/rank and market gap/);
+  });
+
+  it("requires chain locations to stay unscored and unranked", () => {
+    const response = v2Response();
+    response.competitors[0].isChain = true;
+    expect(() => assertRealDataResponse(response)).toThrow(/chain location/);
+  });
+
+  it("leaves a lone scored business unranked", () => {
+    const lone = cloneResponse();
+    lone.summary.scoringVersion = 2;
+    expect(() => assertRealDataResponse(lone)).toThrow(/rank is inconsistent/);
+    lone.user.rank = null;
+    lone.summary.yourRank = null;
+    lone.summary.status = null;
+    expect(() => assertRealDataResponse(lone)).not.toThrow();
+  });
+
+  it("checks audit outcome counts when present", () => {
+    const response = v2Response();
+    response.dataQuality.auditOutcomes = {
+      scored: 2,
+      noWebsite: 0,
+      auditFailed: 1,
+      notAttempted: 0,
+      excludedChains: 0,
+    };
+    expect(() => assertRealDataResponse(response)).toThrow(
+      /auditOutcomes.auditFailed/
+    );
+    response.dataQuality.auditOutcomes.auditFailed = 0;
+    expect(() => assertRealDataResponse(response)).not.toThrow();
   });
 });

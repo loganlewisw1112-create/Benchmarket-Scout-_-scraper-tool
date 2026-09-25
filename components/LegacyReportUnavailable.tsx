@@ -20,7 +20,7 @@ export default function LegacyReportUnavailable({
           ? "This report was created before Benchmark Scout required verified real-world sources and complete citations. Its old values are preserved, but they are not shown as current evidence."
           : "This report does not pass Benchmark Scout's current verified-source validation, so its values are not shown as trustworthy evidence."}
       </p>
-      <p className="max-w-lg text-sm text-slate-500">
+      <p className="max-w-lg text-sm text-slate-600">
         Run a new report to receive the real-data-only format with citation
         markers and a complete sources appendix.
       </p>

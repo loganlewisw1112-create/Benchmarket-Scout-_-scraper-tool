@@ -18,12 +18,16 @@ import {
   KV_REQUEST_TIMEOUT_MS,
   kvCappedRateLimit,
   kvRateLimit,
+  kvRateLimitCount,
   newReportId,
   readReportV2,
+  readSampleMetas,
   readSampleSnapshotsV2,
   replaceSampleSnapshot,
+  SAMPLE_SNAPSHOT_TTL_SECONDS,
   saveReport,
   WAITLIST_NEW_SIGNUPS_PER_WINDOW,
+  WAITLIST_TTL_SECONDS,
 } from "./store";
 import { WINDOW_MS } from "./rate-limit";
 
@@ -36,6 +40,7 @@ let tmpDir: string;
 const prevCacheDir = process.env.CACHE_DIR;
 const prevVercel = process.env.VERCEL;
 const prevVercelEnv = process.env.VERCEL_ENV;
+const prevAllowPreviewKv = process.env.ALLOW_PREVIEW_KV;
 
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "scout-store-"));
@@ -56,6 +61,8 @@ afterEach(async () => {
   else process.env.VERCEL = prevVercel;
   if (prevVercelEnv === undefined) delete process.env.VERCEL_ENV;
   else process.env.VERCEL_ENV = prevVercelEnv;
+  if (prevAllowPreviewKv === undefined) delete process.env.ALLOW_PREVIEW_KV;
+  else process.env.ALLOW_PREVIEW_KV = prevAllowPreviewKv;
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -185,7 +192,7 @@ describe("v2 sample snapshots (filesystem backend)", () => {
     ]);
   });
 
-  it("reports missing, legacy, and invalid outcomes distinctly", async () => {
+  it("reports missing and invalid outcomes; pre-v2 files read as missing", async () => {
     const legacyDir = path.join(tmpDir, "store", "samples");
     const currentDir = path.join(tmpDir, "store", "sample-v2");
     await fs.mkdir(legacyDir, { recursive: true });
@@ -200,7 +207,7 @@ describe("v2 sample snapshots (filesystem backend)", () => {
     ]);
     expect(reads.map((read) => read.outcome.status)).toEqual([
       "missing",
-      "legacy",
+      "missing",
       "invalid",
     ]);
   });
@@ -428,12 +435,290 @@ describe("REST KV request timeout", () => {
     await kvRateLimit("timeout-test", WINDOW_MS, 10);
 
     expect(KV_REQUEST_TIMEOUT_MS).toBe(1_500);
-    expect(timeout).toHaveBeenCalledTimes(2);
+    expect(timeout).toHaveBeenCalledTimes(1);
     expect(timeout).toHaveBeenNthCalledWith(1, KV_REQUEST_TIMEOUT_MS);
-    expect(timeout).toHaveBeenNthCalledWith(2, KV_REQUEST_TIMEOUT_MS);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     for (const [, init] of fetchMock.mock.calls) {
       expect(init?.signal).toBe(controller.signal);
     }
+  });
+});
+
+function sampleSnapshot(catalogId: string, generatedAt = new Date().toISOString()) {
+  return {
+    schemaVersion: 2 as const,
+    sampleId: newReportId(),
+    catalogId,
+    reportId: newReportId(),
+    generatedAt,
+    report: validReport,
+  };
+}
+
+// Minimal Redis-over-REST emulation for GET/SET/MGET plus the store's EVAL
+// scripts, recording every command and each key's TTL.
+function installGenericKvMock() {
+  const data = new Map<string, string>();
+  const ttls = new Map<string, number>();
+  const commands: unknown[][] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const command = JSON.parse(String(init?.body)) as unknown[];
+      commands.push(command);
+      let result: unknown = null;
+      const [name] = command;
+      if (name === "MGET") {
+        result = command.slice(1).map((key) => data.get(String(key)) ?? null);
+      } else if (name === "GET") {
+        result = data.get(String(command[1])) ?? null;
+      } else if (name === "SET") {
+        data.set(String(command[1]), String(command[2]));
+        if (command[3] === "EX") ttls.set(String(command[1]), Number(command[4]));
+        result = "OK";
+      } else if (name === "EVAL") {
+        const script = String(command[1]);
+        if (script.includes("'SET'")) {
+          // SAMPLE_SNAPSHOT_WRITE_SCRIPT: KEYS[1..2], ARGV[1..3]
+          const [k1, k2, v1, v2, ttl] = command.slice(3).map(String);
+          data.set(k1!, v1!);
+          data.set(k2!, v2!);
+          ttls.set(k1!, Number(ttl));
+          ttls.set(k2!, Number(ttl));
+          result = 1;
+        } else {
+          // FIXED_WINDOW_COUNTER_SCRIPT
+          const key = String(command[3]);
+          const next = Number(data.get(key) ?? "0") + 1;
+          data.set(key, String(next));
+          if (!ttls.has(key)) ttls.set(key, Number(command[4]));
+          result = next;
+        }
+      } else {
+        throw new Error(`unexpected command ${String(name)}`);
+      }
+      return new Response(JSON.stringify({ result }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    })
+  );
+  return { data, ttls, commands };
+}
+
+describe("sample snapshot TTL and metadata (KV backend)", () => {
+  beforeEach(() => {
+    process.env.KV_REST_API_URL = "https://kv.test";
+    process.env.KV_REST_API_TOKEN = "token";
+  });
+
+  it("writes the snapshot and its metadata atomically with a 30-day TTL", async () => {
+    const kv = installGenericKvMock();
+    const snapshot = sampleSnapshot("bakery-firebrand-bread");
+    await replaceSampleSnapshot(snapshot);
+
+    expect(kv.commands).toHaveLength(1);
+    expect(kv.commands[0]?.[0]).toBe("EVAL");
+    expect(SAMPLE_SNAPSHOT_TTL_SECONDS).toBe(30 * 24 * 60 * 60);
+    expect(kv.ttls.get("sample:v2:bakery-firebrand-bread")).toBe(SAMPLE_SNAPSHOT_TTL_SECONDS);
+    expect(kv.ttls.get("sample:v2:meta:bakery-firebrand-bread")).toBe(
+      SAMPLE_SNAPSHOT_TTL_SECONDS
+    );
+    expect(JSON.parse(kv.data.get("sample:v2:meta:bakery-firebrand-bread")!)).toEqual({
+      schemaVersion: 2,
+      catalogId: snapshot.catalogId,
+      sampleId: snapshot.sampleId,
+      reportId: snapshot.reportId,
+      generatedAt: snapshot.generatedAt,
+    });
+  });
+
+  it("reads metadata with a single MGET, never touching snapshot bodies", async () => {
+    const kv = installGenericKvMock();
+    await replaceSampleSnapshot(sampleSnapshot("bakery-firebrand-bread"));
+    await replaceSampleSnapshot(sampleSnapshot("cafe-wescafe"));
+    kv.commands.length = 0;
+    kv.data.set("sample:v2:meta:broken-entry", "{}");
+
+    const reads = await readSampleMetas([
+      "bakery-firebrand-bread",
+      "cafe-wescafe",
+      "broken-entry",
+    ]);
+    expect(reads.map((read) => read.outcome.status)).toEqual(["ok", "ok", "invalid"]);
+    expect(kv.commands).toEqual([
+      [
+        "MGET",
+        "sample:v2:meta:bakery-firebrand-bread",
+        "sample:v2:meta:cafe-wescafe",
+        "sample:v2:meta:broken-entry",
+      ],
+    ]);
+  });
+
+  it("falls back to the snapshot for pre-metadata entries and backfills the metadata", async () => {
+    const kv = installGenericKvMock();
+    const tenDaysMs = 10 * 24 * 60 * 60 * 1000;
+    const generatedAt = new Date(Date.now() - tenDaysMs).toISOString();
+    const olderWrite = sampleSnapshot("gym-alameda-fitness", generatedAt);
+    kv.data.set("sample:v2:gym-alameda-fitness", JSON.stringify(olderWrite));
+
+    const first = await readSampleMetas(["gym-alameda-fitness", "never-refreshed"]);
+    expect(first[0]?.outcome).toMatchObject({ status: "ok", value: { generatedAt } });
+    expect(first[1]?.outcome.status).toBe("missing");
+    expect(kv.commands.map((command) => command[0])).toEqual(["MGET", "MGET", "SET"]);
+    // The backfilled record expires with the snapshot's age window
+    // (generatedAt + 30 days), not a fresh 30 days from now.
+    const ttl = kv.ttls.get("sample:v2:meta:gym-alameda-fitness")!;
+    expect(ttl).toBeGreaterThan(SAMPLE_SNAPSHOT_TTL_SECONDS - tenDaysMs / 1000 - 60);
+    expect(ttl).toBeLessThanOrEqual(SAMPLE_SNAPSHOT_TTL_SECONDS - tenDaysMs / 1000 + 1);
+
+    kv.commands.length = 0;
+    const second = await readSampleMetas(["gym-alameda-fitness"]);
+    expect(second[0]?.outcome.status).toBe("ok");
+    expect(kv.commands.map((command) => command[0])).toEqual(["MGET"]);
+  });
+
+  it("backfills a snapshot already past its age window with a full TTL", async () => {
+    const kv = installGenericKvMock();
+    // Pre-TTL snapshot (no expiry in Redis), like the 2026-07-20 gym entry.
+    const stale = sampleSnapshot("gym-alameda-fitness", "2026-07-20T12:28:20.000Z");
+    kv.data.set("sample:v2:gym-alameda-fitness", JSON.stringify(stale));
+
+    const reads = await readSampleMetas(["gym-alameda-fitness"]);
+    expect(reads[0]?.outcome).toMatchObject({
+      status: "ok",
+      value: { generatedAt: "2026-07-20T12:28:20.000Z" },
+    });
+    expect(kv.commands.map((command) => command[0])).toEqual(["MGET", "MGET", "SET"]);
+    expect(kv.ttls.get("sample:v2:meta:gym-alameda-fitness")).toBe(
+      SAMPLE_SNAPSHOT_TTL_SECONDS
+    );
+  });
+
+  it("reads served snapshots with one MGET and no legacy second read", async () => {
+    const kv = installGenericKvMock();
+    const reads = await readSampleSnapshotsV2(["missing-one", "missing-two"]);
+    expect(reads.map((read) => read.outcome.status)).toEqual(["missing", "missing"]);
+    expect(kv.commands).toEqual([
+      ["MGET", "sample:v2:missing-one", "sample:v2:missing-two"],
+    ]);
+  });
+});
+
+describe("sample metadata (filesystem backend)", () => {
+  it("writes metadata beside the snapshot and backfills it for older snapshots", async () => {
+    await replaceSampleSnapshot(sampleSnapshot("bakery-firebrand-bread"));
+    expect(await fs.readdir(path.join(tmpDir, "store", "sample-v2-meta"))).toEqual([
+      "bakery-firebrand-bread.json",
+    ]);
+
+    await fs.writeFile(
+      path.join(tmpDir, "store", "sample-v2", "cafe-wescafe.json"),
+      JSON.stringify(sampleSnapshot("cafe-wescafe"))
+    );
+    const reads = await readSampleMetas(["bakery-firebrand-bread", "cafe-wescafe"]);
+    expect(reads.map((read) => read.outcome.status)).toEqual(["ok", "ok"]);
+    expect(
+      (await fs.readdir(path.join(tmpDir, "store", "sample-v2-meta"))).sort()
+    ).toEqual(["bakery-firebrand-bread.json", "cafe-wescafe.json"]);
+  });
+});
+
+describe("atomic fixed-window counter", () => {
+  beforeEach(() => {
+    process.env.KV_REST_API_URL = "https://kv.test";
+    process.env.KV_REST_API_TOKEN = "token";
+  });
+
+  it("increments and arms the expiry in one EVAL", async () => {
+    const kv = installGenericKvMock();
+    const T0 = 1_760_000_000_000;
+    expect((await kvRateLimit("ip:analyze:1.2.3.4", WINDOW_MS, 2, T0))?.allowed).toBe(true);
+    expect((await kvRateLimit("ip:analyze:1.2.3.4", WINDOW_MS, 2, T0))?.allowed).toBe(true);
+    const third = await kvRateLimit("ip:analyze:1.2.3.4", WINDOW_MS, 2, T0);
+    expect(third).toMatchObject({ allowed: false, remaining: 0 });
+    expect(kv.commands).toHaveLength(3);
+    for (const command of kv.commands) {
+      expect(command[0]).toBe("EVAL");
+      expect(String(command[1])).toContain("INCR");
+      expect(String(command[1])).toContain("PEXPIRE");
+      expect(command[4]).toBe(WINDOW_MS);
+    }
+    expect(kv.commands[0]?.[3]).toBe(
+      `rl:ip:analyze:1.2.3.4:${Math.floor(T0 / WINDOW_MS)}`
+    );
+  });
+
+  it("peeks at the counter with a GET that never increments it", async () => {
+    const kv = installGenericKvMock();
+    const T0 = 1_760_000_000_000;
+    expect(await kvRateLimitCount("ip:refresh-auth:1.2.3.4", WINDOW_MS, T0)).toMatchObject({
+      count: 0,
+    });
+    await kvRateLimit("ip:refresh-auth:1.2.3.4", WINDOW_MS, 10, T0);
+    await kvRateLimit("ip:refresh-auth:1.2.3.4", WINDOW_MS, 10, T0);
+    expect(await kvRateLimitCount("ip:refresh-auth:1.2.3.4", WINDOW_MS, T0)).toMatchObject({
+      count: 2,
+    });
+    expect(await kvRateLimitCount("ip:refresh-auth:1.2.3.4", WINDOW_MS, T0)).toMatchObject({
+      count: 2,
+    });
+    expect(kv.commands.filter((command) => command[0] === "GET")).toEqual([
+      ["GET", `rl:ip:refresh-auth:1.2.3.4:${Math.floor(T0 / WINDOW_MS)}`],
+      ["GET", `rl:ip:refresh-auth:1.2.3.4:${Math.floor(T0 / WINDOW_MS)}`],
+      ["GET", `rl:ip:refresh-auth:1.2.3.4:${Math.floor(T0 / WINDOW_MS)}`],
+    ]);
+  });
+});
+
+describe("waitlist retention", () => {
+  it("re-arms a 365-day TTL on the waitlist keys with every admission", async () => {
+    process.env.KV_REST_API_URL = "https://kv.test";
+    process.env.KV_REST_API_TOKEN = "token";
+    const state = installKvMock();
+    await admitWaitlistEmail("ttl@example.com", {}, 1_760_000_000_000);
+    const command = state.commands[0]!;
+    expect(WAITLIST_TTL_SECONDS).toBe(365 * 24 * 60 * 60);
+    expect(command.at(-1)).toBe(WAITLIST_TTL_SECONDS);
+    const script = String(command[1]);
+    // Both the "exists" and the "added" branches re-arm both keys.
+    expect(script.split("redis.call('EXPIRE', KEYS[1], tonumber(ARGV[5]))")).toHaveLength(3);
+    expect(script.split("redis.call('EXPIRE', KEYS[2], tonumber(ARGV[5]))")).toHaveLength(3);
+  });
+});
+
+describe("preview KV guard", () => {
+  beforeEach(() => {
+    process.env.KV_REST_API_URL = "https://kv.test";
+    process.env.KV_REST_API_TOKEN = "token";
+  });
+
+  it("treats KV as unconfigured on a preview and uses the filesystem store", async () => {
+    process.env.VERCEL_ENV = "preview";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(isDurableStoreConfigured()).toBe(false);
+    const id = await saveReport(validReport);
+    expect((await getReport(id))?.id).toBe(id);
+    expect(await kvRateLimit("ip:analyze:1.2.3.4", WINDOW_MS, 10)).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await fs.readdir(path.join(tmpDir, "store", "report-v2"))).toEqual([
+      `${id}.json`,
+    ]);
+    warn.mockRestore();
+  });
+
+  it("uses KV on a preview only with ALLOW_PREVIEW_KV=true", () => {
+    process.env.VERCEL_ENV = "preview";
+    process.env.ALLOW_PREVIEW_KV = "true";
+    expect(isDurableStoreConfigured()).toBe(true);
+  });
+
+  it("leaves production KV selection unchanged", () => {
+    process.env.VERCEL_ENV = "production";
+    expect(isDurableStoreConfigured()).toBe(true);
   });
 });
