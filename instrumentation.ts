@@ -21,17 +21,24 @@ export const onRequestError: Instrumentation.onRequestError = async (
   context
 ) => {
   if (process.env.NEXT_RUNTIME === "edge") return;
-  const { createRequestLogger, getCurrentRequestId, serializeError } =
-    await import("./lib/logger");
+  const {
+    createRequestLogger,
+    getCurrentRequestId,
+    logLevelForError,
+    serializeError,
+  } = await import("./lib/logger");
 
   // Reuse the request's correlation id when the error surfaced inside a
   // withRequestId() scope; otherwise mint one so the line is still traceable.
   const requestId = getCurrentRequestId() ?? crypto.randomUUID();
 
-  createRequestLogger(requestId).error(
+  // User-caused failures (validation, unknown market, any 4xx) log at warn so
+  // error-level lines stay reserved for real faults.
+  createRequestLogger(requestId)[logLevelForError(error)](
     "unhandled server error captured by Next.js",
     {
-      path: request.path,
+      // Path only: the query string can carry user input.
+      path: request.path.split("?")[0],
       method: request.method,
       routerKind: context.routerKind,
       routePath: context.routePath,

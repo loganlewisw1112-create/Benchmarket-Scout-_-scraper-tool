@@ -1,6 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import SiteFooter from "@/components/SiteFooter";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,16 +15,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const SITE_NAME = "Benchmark Scout";
-const SITE_DESCRIPTION =
-  "Local competitor intelligence from public web signals.";
-
-// Absolute base for social image URLs. Without this Next falls back to
-// VERCEL_URL, which is the per-deployment hostname rather than the stable
-// alias — shares would point at a build-specific URL.
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://benchmark-scout.vercel.app";
-
+// metadataBase comes from lib/site.ts (NEXT_PUBLIC_SITE_URL, defaulting to
+// the primary domain), so canonical and social image URLs are absolute to the
+// primary host even when served from a secondary Vercel domain. Canonical
+// links are set per page (a root-level canonical would be inherited by every
+// route and point them all at the home page).
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: SITE_NAME,
@@ -35,11 +32,17 @@ export const metadata: Metadata = {
   },
   twitter: {
     // Large card so shared links preview with the 1200x630 opengraph-image.png
-    // in this segment. X falls back to og:image when twitter:image is unset.
+    // in this segment (file-based, so it is not repeated here). X falls back
+    // to og:image when twitter:image is unset.
     card: "summary_large_image",
     title: SITE_NAME,
     description: SITE_DESCRIPTION,
   },
+};
+
+// Light-only UI (see globals.css): emits <meta name="color-scheme">.
+export const viewport: Viewport = {
+  colorScheme: "light",
 };
 
 export default function RootLayout({
@@ -47,6 +50,9 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // suppressHydrationWarning stays on <html>/<body> only: browser extensions
+  // commonly inject attributes there before hydration. It does not reach
+  // descendants, so mismatches inside the app still warn.
   return (
     <html
       lang="en"
@@ -54,7 +60,8 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
-        {children}
+        <div className="flex-1">{children}</div>
+        <SiteFooter />
         {/* Cookieless page analytics. Disclosed on /privacy — keep the two in
             sync if this ever collects more than anonymous page views. */}
         <Analytics />

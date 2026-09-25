@@ -1,6 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
+import {
+  describeApiError,
+  NETWORK_ERROR_MESSAGE,
+  readJsonBody,
+} from "@/lib/client-errors";
 import { jsonHeaders } from "@/lib/scout-client";
 
 type Status = "idle" | "submitting" | "added" | "exists" | "error";
@@ -25,8 +31,9 @@ export default function WaitlistForm({
     if (!email) return;
     setStatus("submitting");
     setStatusMessage("");
+    let res: Response;
     try {
-      const res = await fetch("/api/waitlist", {
+      res = await fetch("/api/waitlist", {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({
@@ -36,20 +43,29 @@ export default function WaitlistForm({
           reportId,
         }),
       });
-      const json = await res.json();
-      if (!res.ok) {
-        setStatus("error");
-        setStatusMessage(
-          json?.error ?? "Something went wrong. Please try again."
-        );
-        return;
-      }
-      setStatus(json.status === "exists" ? "exists" : "added");
-      setStatusMessage(json?.message ?? "Thanks!");
     } catch {
       setStatus("error");
-      setStatusMessage("Could not reach the server. Please try again.");
+      setStatusMessage(NETWORK_ERROR_MESSAGE);
+      return;
     }
+    const json = (await readJsonBody(res)) as {
+      status?: unknown;
+      message?: unknown;
+    } | null;
+    if (!res.ok) {
+      setStatus("error");
+      setStatusMessage(
+        describeApiError(
+          res.status,
+          json,
+          res.headers?.get("Retry-After") ?? null,
+          "waitlist"
+        )
+      );
+      return;
+    }
+    setStatus(json?.status === "exists" ? "exists" : "added");
+    setStatusMessage(typeof json?.message === "string" ? json.message : "Thanks!");
   }
 
   const done = status === "added" || status === "exists";
@@ -88,7 +104,7 @@ export default function WaitlistForm({
               placeholder="you@business.com"
               required
               maxLength={254}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -97,7 +113,7 @@ export default function WaitlistForm({
               className="text-xs font-medium text-slate-700"
             >
               Feedback{" "}
-              <span className="font-normal text-slate-500">(optional)</span>
+              <span className="font-normal text-slate-600">(optional)</span>
             </label>
             <textarea
               id="waitlist-feedback"
@@ -106,12 +122,24 @@ export default function WaitlistForm({
               placeholder="Tell us what worked, what was confusing, or what you need next."
               maxLength={1000}
               rows={3}
-              className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
+          <p id="waitlist-consent" className="text-xs leading-relaxed text-slate-600">
+            By sending, you agree that we store your email (and feedback, if
+            given) to send product updates and reply to you. The{" "}
+            <Link
+              href="/privacy"
+              className="font-medium text-indigo-700 underline underline-offset-2 hover:text-indigo-600"
+            >
+              privacy page
+            </Link>{" "}
+            explains how long it is kept and how to ask for deletion.
+          </p>
           <div>
             <button
               type="submit"
+              aria-describedby="waitlist-consent"
               disabled={status === "submitting"}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -122,7 +150,9 @@ export default function WaitlistForm({
       )}
 
       {status === "error" && (
-        <p className="mt-2 text-xs text-red-600">{statusMessage}</p>
+        <p role="alert" className="mt-2 text-xs text-red-700">
+          {statusMessage}
+        </p>
       )}
     </div>
   );

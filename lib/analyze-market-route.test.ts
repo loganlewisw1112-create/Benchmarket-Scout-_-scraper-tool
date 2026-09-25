@@ -3,28 +3,40 @@ import type { AnalyzeMarketResponse } from "./types";
 
 const mocks = vi.hoisted(() => ({
   analyzeMarket: vi.fn(),
+  readCachedAnalysis: vi.fn(),
   enforceGuard: vi.fn(),
+  enforceSameSiteJsonPost: vi.fn(),
   enforceGlobalAnalyzeLimit: vi.fn(),
   saveReport: vi.fn(),
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@/lib/analyze-market", () => ({ analyzeMarket: mocks.analyzeMarket }));
+vi.mock("@/lib/analyze-market", () => ({
+  analyzeMarket: mocks.analyzeMarket,
+  readCachedAnalysis: mocks.readCachedAnalysis,
+}));
 vi.mock("@/lib/api-guard", () => ({
   enforceGuard: mocks.enforceGuard,
+  enforceSameSiteJsonPost: mocks.enforceSameSiteJsonPost,
   enforceGlobalAnalyzeLimit: mocks.enforceGlobalAnalyzeLimit,
 }));
 vi.mock("@/lib/store", () => ({ saveReport: mocks.saveReport }));
 vi.mock("@/lib/logger", () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: mocks.logger,
   serializeError: (error: unknown) => ({ message: String(error) }),
   withRequestId: (_id: string, callback: () => unknown) => callback(),
 }));
 
 import { POST } from "@/app/api/analyze-market/route";
 import {
+  AmbiguousMarketError,
+  AnalysisTimeoutError,
+  IndustryNotResolvedError,
   InsufficientRealDataError,
   MarketNotFoundError,
+  NoCompetitorsFoundError,
   SourceUnavailableError,
+  UserSiteUnavailableError,
 } from "./pipeline-errors";
 
 function request(body: unknown) {
@@ -141,7 +153,8 @@ function validResponse(): AnalyzeMarketResponse {
         riskScore: 0,
         changeScore: 0,
       },
-      finalScore: 55,
+      // 0.6 * 50 + 0.2 * 50 + 0.15 * 0 + 0.05 * (100 - 0)
+      finalScore: 45,
       rank: 1,
     },
     competitors: [],
@@ -190,6 +203,8 @@ describe("POST /api/analyze-market", () => {
     delete process.env.MAINTENANCE_MODE;
     vi.clearAllMocks();
     mocks.enforceGuard.mockResolvedValue({ ok: true });
+    mocks.enforceSameSiteJsonPost.mockReturnValue({ ok: true });
+    mocks.readCachedAnalysis.mockResolvedValue(null);
     mocks.enforceGlobalAnalyzeLimit.mockResolvedValue({ ok: true });
     mocks.analyzeMarket.mockResolvedValue(validResponse());
     mocks.saveReport.mockResolvedValue("report123");
@@ -220,12 +235,111 @@ describe("POST /api/analyze-market", () => {
     [new MarketNotFoundError("Nowhere"), 422, "MARKET_NOT_FOUND"],
     [new SourceUnavailableError("overpass", "Unavailable"), 503, "SOURCE_UNAVAILABLE"],
     [new InsufficientRealDataError(), 422, "INSUFFICIENT_REAL_DATA"],
-  ])("maps typed pipeline errors", async (error, status, code) => {
+    [new IndustryNotResolvedError("widgetry"), 422, "INDUSTRY_NOT_RESOLVED"],
+    [new NoCompetitorsFoundError("escape room", "Alameda", 3), 422, "NO_COMPETITORS_FOUND"],
+    [new AnalysisTimeoutError(), 504, "ANALYSIS_TIMEOUT"],
+    [new Error("socket hang up at 10.0.0.1"), 500, "INTERNAL_ERROR"],
+  ])("maps pipeline errors to the error contract", async (error, status, code) => {
     mocks.analyzeMarket.mockRejectedValue(error);
     const response = await POST(request(validRequest()));
     expect(response.status).toBe(status);
-    expect(await response.json()).toMatchObject({ code });
+    const body = await response.json();
+    expect(body).toMatchObject({ code, error: expect.any(String) });
+    expect(body.error).not.toContain("10.0.0.1");
     expect(mocks.saveReport).not.toHaveBeenCalled();
+    if (status < 500) expect(mocks.logger.error).not.toHaveBeenCalled();
+    else expect(mocks.logger.error).toHaveBeenCalled();
+  });
+
+  it("returns ambiguous-market candidates and the user-site reason", async () => {
+    mocks.analyzeMarket.mockRejectedValueOnce(
+      new AmbiguousMarketError("Springfield, US", ["Springfield, IL", "Springfield, MO"])
+    );
+    const ambiguous = await POST(request(validRequest()));
+    expect(ambiguous.status).toBe(422);
+    expect(await ambiguous.json()).toMatchObject({
+      code: "AMBIGUOUS_MARKET",
+      candidates: ["Springfield, IL", "Springfield, MO"],
+    });
+
+    mocks.analyzeMarket.mockRejectedValueOnce(
+      new UserSiteUnavailableError("blocked_by_site", "Your website refused our check.")
+    );
+    const blocked = await POST(request(validRequest()));
+    expect(blocked.status).toBe(422);
+    expect(await blocked.json()).toMatchObject({
+      code: "USER_SITE_UNAVAILABLE",
+      reason: "blocked_by_site",
+      retryable: true,
+    });
+    expect(blocked.headers.get("Retry-After")).toBe("60");
+
+    mocks.analyzeMarket.mockRejectedValueOnce(
+      new UserSiteUnavailableError("dns_unresolved", "Your website's domain does not resolve.")
+    );
+    const dead = await POST(request(validRequest()));
+    expect(await dead.json()).toMatchObject({
+      code: "USER_SITE_UNAVAILABLE",
+      reason: "dns_unresolved",
+      retryable: false,
+    });
+    expect(dead.headers.get("Retry-After")).toBeNull();
+    expect(mocks.saveReport).not.toHaveBeenCalled();
+  });
+
+  it("passes the request's abort signal into the pipeline", async () => {
+    const req = request(validRequest());
+    await POST(req);
+    expect(mocks.analyzeMarket).toHaveBeenCalledWith(
+      expect.objectContaining({ businessName: "Real Business" }),
+      { signal: req.signal }
+    );
+  });
+
+  it("applies the same-site JSON check and the analyze bucket before parsing", async () => {
+    mocks.enforceSameSiteJsonPost.mockReturnValue({
+      ok: false,
+      status: 415,
+      code: "UNSUPPORTED_MEDIA_TYPE",
+      error: "Requests must be sent as JSON.",
+    });
+    const rejected = await POST(request(validRequest()));
+    expect(rejected.status).toBe(415);
+    expect(await rejected.json()).toEqual({
+      code: "UNSUPPORTED_MEDIA_TYPE",
+      error: "Requests must be sent as JSON.",
+    });
+    expect(mocks.enforceGuard).not.toHaveBeenCalled();
+    expect(mocks.analyzeMarket).not.toHaveBeenCalled();
+
+    mocks.enforceSameSiteJsonPost.mockReturnValue({ ok: true });
+    await POST(request(validRequest()));
+    expect(mocks.enforceGuard).toHaveBeenCalledWith(expect.any(Request), {
+      bucket: "analyze",
+    });
+  });
+
+  it("reports unknown keys in the 400 details and uses no global slot", async () => {
+    const response = await POST(request({ ...validRequest(), extra: "field" }));
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.code).toBe("INVALID_REQUEST");
+    expect(body.details.formErrors.join(" ")).toMatch(/extra/);
+    expect(mocks.enforceGlobalAnalyzeLimit).not.toHaveBeenCalled();
+  });
+
+  it("serves a cached analysis without using a global analysis slot", async () => {
+    const cached = validResponse();
+    cached.dataQuality.cacheHit = true;
+    mocks.readCachedAnalysis.mockResolvedValue(cached);
+    const response = await POST(request(validRequest()));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      generatedAt: "2026-07-19T00:00:00.000Z",
+      dataQuality: { cacheHit: true },
+    });
+    expect(mocks.enforceGlobalAnalyzeLimit).not.toHaveBeenCalled();
+    expect(mocks.analyzeMarket).not.toHaveBeenCalled();
   });
 
   it("returns 503 instead of an unpersisted success", async () => {

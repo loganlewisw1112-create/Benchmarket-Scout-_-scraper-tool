@@ -1,12 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const storeMocks = vi.hoisted(() => ({ readSampleMetas: vi.fn() }));
+vi.mock("./store", () => ({
+  SAMPLE_SNAPSHOT_TTL_SECONDS: 60 * 60 * 24 * 30,
+  readSampleMetas: storeMocks.readSampleMetas,
+  readSampleSnapshotsV2: vi.fn(),
+}));
 import {
   activeSnapshotsFromReads,
   SAMPLE_MAX_AGE_MS,
+  SAMPLE_HEALTH_CACHE_MS,
+  SAMPLE_RETAINED_MAX_AGE_MS,
+  getSamplePoolHealth,
+  resetSamplePoolHealthCache,
   sampleFreshness,
+  samplePoolHealthFromMetas,
   samplePoolHealthFromReads,
   selectableSnapshotsFromReads,
 } from "./sample-pool";
-import type { CatalogSampleRead, SampleSnapshotV2 } from "./store";
+import type {
+  CatalogSampleMetaRead,
+  CatalogSampleRead,
+  SampleSnapshotV2,
+} from "./store";
 import type { AnalyzeMarketResponse } from "./types";
 
 const NOW = Date.parse("2026-07-19T12:00:00.000Z");
@@ -46,45 +62,96 @@ describe("real sample pool", () => {
     expect(selected[11]?.catalogId).toBe("catalog-11");
   });
 
-  it("alerts below ten active samples or when the oldest retained sample is stale", () => {
+  it("alerts below ten active samples, measured over the served pool only", () => {
     const healthy = Array.from({ length: 10 }, (_, index) =>
       readAtAge(`fresh-${index}`, index + 1)
     );
     expect(samplePoolHealthFromReads(healthy, NOW)).toMatchObject({
       activeSampleCount: 10,
+      servedSampleCount: 10,
+      servingRetained: false,
       oldestSampleAgeHours: 10,
+      newestSampleAgeHours: 1,
       alert: false,
+      alertReasons: [],
     });
 
-    const staleBackup = [...healthy, readAtAge("retained-stale", 73)];
-    expect(samplePoolHealthFromReads(staleBackup, NOW)).toMatchObject({
-      activeSampleCount: 10,
-      oldestSampleAgeHours: 73,
+    const nine = healthy.slice(0, 9);
+    expect(samplePoolHealthFromReads(nine, NOW)).toMatchObject({
+      activeSampleCount: 9,
       alert: true,
-      alertReasons: ["OLDEST_SAMPLE_TOO_OLD"],
-    });
-
-    expect(samplePoolHealthFromReads([readAtAge("only-stale", 73)], NOW)).toMatchObject({
-      activeSampleCount: 0,
-      oldestSampleAgeHours: 73,
-      alert: true,
-      alertReasons: ["ACTIVE_SAMPLE_COUNT_LOW", "OLDEST_SAMPLE_TOO_OLD"],
+      alertReasons: ["ACTIVE_SAMPLES_LOW"],
     });
   });
 
-  it("keeps the active count capped at 12 while alerting on a retained stale snapshot", () => {
+  it("does not alert on stale or missing catalog snapshots that are never served", () => {
+    // Regression: a 65-day-old snapshot for an id that keeps failing refresh
+    // pinned the old OLDEST_SAMPLE_TOO_OLD alert on permanently.
     const reads = [
-      ...Array.from({ length: 13 }, (_, index) =>
-        readAtAge(`active-${index}`, index + 1)
-      ),
+      ...Array.from({ length: 13 }, (_, index) => readAtAge(`active-${index}`, index + 1)),
       readAtAge("retained-stale", 73),
+      readAtAge("gym-from-july", 1574),
+      { catalogId: "never-refreshed", outcome: { status: "missing" as const } },
     ];
-    expect(samplePoolHealthFromReads(reads, NOW)).toMatchObject({
+    const health = samplePoolHealthFromReads(reads, NOW);
+    expect(health).toMatchObject({
       activeSampleCount: 12,
+      servedSampleCount: 12,
+      oldestSampleAgeHours: 12,
+      alert: false,
+      alertReasons: [],
+    });
+    // Coverage is reported as info: 13 fresh ids, 3 without a fresh snapshot.
+    expect(health.catalog).toEqual({
+      size: 16,
+      withoutFreshSnapshot: 3,
+      withoutFreshSnapshotIds: ["retained-stale", "gym-from-july", "never-refreshed"],
+    });
+  });
+
+  it("alerts SERVED_SAMPLES_STALE when the pool falls back to retained snapshots", () => {
+    expect(samplePoolHealthFromReads([readAtAge("only-stale", 73)], NOW)).toMatchObject({
+      activeSampleCount: 0,
+      servedSampleCount: 1,
+      servingRetained: true,
       oldestSampleAgeHours: 73,
       alert: true,
-      alertReasons: ["OLDEST_SAMPLE_TOO_OLD"],
+      alertReasons: ["ACTIVE_SAMPLES_LOW", "SERVED_SAMPLES_STALE"],
     });
+  });
+
+  it("reports an empty pool without a stale alert it cannot measure", () => {
+    expect(samplePoolHealthFromReads([], NOW)).toMatchObject({
+      activeSampleCount: 0,
+      servedSampleCount: 0,
+      servingRetained: false,
+      oldestSampleAgeHours: null,
+      alertReasons: ["ACTIVE_SAMPLES_LOW"],
+    });
+  });
+
+  it("computes the same health from metadata records as from full snapshots", () => {
+    const reads = [readAtAge("a", 2), readAtAge("b", 80), readAtAge("c", 5)];
+    const metas: CatalogSampleMetaRead[] = reads.map((read) =>
+      read.outcome.status === "ok"
+        ? {
+            catalogId: read.catalogId,
+            outcome: {
+              status: "ok",
+              value: {
+                schemaVersion: 2,
+                catalogId: read.catalogId,
+                sampleId: read.outcome.value.sampleId,
+                reportId: read.outcome.value.reportId,
+                generatedAt: read.outcome.value.generatedAt,
+              },
+            },
+          }
+        : { catalogId: read.catalogId, outcome: { status: "missing" } }
+    );
+    expect(samplePoolHealthFromMetas(metas, NOW)).toEqual(
+      samplePoolHealthFromReads(reads, NOW)
+    );
   });
 
   it("falls back to freshest retained snapshots when the active pool is empty", () => {
@@ -98,6 +165,16 @@ describe("real sample pool", () => {
       "stale-newer",
       "stale-older",
     ]);
+  });
+
+  it("never serves a retained snapshot older than the store TTL", () => {
+    const ttlHours = SAMPLE_RETAINED_MAX_AGE_MS / (60 * 60 * 1000);
+    expect(ttlHours).toBe(30 * 24);
+    const reads = [readAtAge("within-ttl", ttlHours - 1), readAtAge("past-ttl", ttlHours + 1)];
+    expect(selectableSnapshotsFromReads(reads, NOW).map((item) => item.catalogId)).toEqual([
+      "within-ttl",
+    ]);
+    expect(selectableSnapshotsFromReads([readAtAge("past-ttl", ttlHours + 1)], NOW)).toEqual([]);
   });
 
   it("prefers active snapshots over retained stale ones when both exist", () => {
@@ -118,5 +195,31 @@ describe("real sample pool", () => {
     if (retained.status === "ok") {
       expect(sampleFreshness(retained.value, NOW)).toBe("retained");
     }
+  });
+});
+
+describe("getSamplePoolHealth memo", () => {
+  beforeEach(() => {
+    resetSamplePoolHealthCache();
+    storeMocks.readSampleMetas.mockReset();
+  });
+
+  it("reads metadata once per 30 seconds per instance and shares in-flight reads", async () => {
+    storeMocks.readSampleMetas.mockResolvedValue([]);
+    await Promise.all([getSamplePoolHealth(NOW), getSamplePoolHealth(NOW)]);
+    await getSamplePoolHealth(NOW + SAMPLE_HEALTH_CACHE_MS - 1);
+    expect(storeMocks.readSampleMetas).toHaveBeenCalledTimes(1);
+    await getSamplePoolHealth(NOW + SAMPLE_HEALTH_CACHE_MS);
+    expect(storeMocks.readSampleMetas).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cache a failed store read", async () => {
+    storeMocks.readSampleMetas.mockRejectedValueOnce(new Error("KV down"));
+    await expect(getSamplePoolHealth(NOW)).rejects.toThrow("KV down");
+    storeMocks.readSampleMetas.mockResolvedValueOnce([]);
+    await expect(getSamplePoolHealth(NOW + 1)).resolves.toMatchObject({
+      activeSampleCount: 0,
+    });
+    expect(storeMocks.readSampleMetas).toHaveBeenCalledTimes(2);
   });
 });

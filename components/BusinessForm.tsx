@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { normalizeWebsiteUrl } from "@/lib/client-errors";
 import type { AnalyzeMarketRequest } from "@/lib/types";
 
 export default function BusinessForm({
@@ -14,11 +15,21 @@ export default function BusinessForm({
   const [businessUrl, setBusinessUrl] = useState("");
   const [businessType, setBusinessType] = useState("");
   const [market, setMarket] = useState("");
+  const [urlError, setUrlError] = useState<string | null>(null);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!businessName || !businessUrl || !businessType || !market) return;
-    onSubmit({ businessName, businessUrl, businessType, market });
+    // Catch typos here instead of after a slow server round trip. Bare
+    // domains are accepted and sent as https://.
+    const website = normalizeWebsiteUrl(businessUrl);
+    if (!website.ok) {
+      setUrlError(website.message);
+      return;
+    }
+    setUrlError(null);
+    if (website.url !== businessUrl) setBusinessUrl(website.url);
+    onSubmit({ businessName, businessUrl: website.url, businessType, market });
   }
 
   return (
@@ -36,22 +47,45 @@ export default function BusinessForm({
           placeholder="Logan Lawn Care"
           maxLength={80}
           required
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
         />
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-slate-700">
+        <label
+          htmlFor="business-url"
+          className="text-sm font-medium text-slate-700"
+        >
           Business website
         </label>
+        {/* Plain text, not type="url": the browser's URL check would reject
+            bare domains like "acme.com", which normalizeWebsiteUrl accepts. */}
         <input
+          id="business-url"
+          type="text"
+          inputMode="url"
+          autoComplete="url"
           value={businessUrl}
-          onChange={(e) => setBusinessUrl(e.target.value)}
+          onChange={(e) => {
+            setBusinessUrl(e.target.value);
+            if (urlError) setUrlError(null);
+          }}
           placeholder="https://example.com"
           maxLength={300}
           required
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+          aria-invalid={urlError ? true : undefined}
+          aria-describedby={urlError ? "business-url-error" : undefined}
+          className={`rounded-lg border bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-1 ${
+            urlError
+              ? "border-red-400 focus:border-red-500 focus:ring-red-500"
+              : "border-slate-300 focus:border-slate-500 focus:ring-slate-500"
+          }`}
         />
+        {urlError ? (
+          <p id="business-url-error" role="alert" className="text-xs text-red-700">
+            {urlError}
+          </p>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -64,7 +98,7 @@ export default function BusinessForm({
           placeholder="landscaping, plumbing, dentist…"
           maxLength={80}
           required
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
         />
       </div>
 
@@ -78,7 +112,7 @@ export default function BusinessForm({
           placeholder="Dallas, TX"
           maxLength={120}
           required
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
         />
       </div>
 

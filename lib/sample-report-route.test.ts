@@ -25,6 +25,7 @@ vi.mock("@/lib/logger", () => ({
 import { GET } from "@/app/api/sample-report/route";
 
 beforeEach(() => {
+  mocks.guard.mockReset();
   mocks.guard.mockResolvedValue({ ok: true });
   mocks.maintenance = false;
   mocks.select.mockReset();
@@ -58,5 +59,38 @@ describe("GET /api/sample-report", () => {
     const response = await GET(new Request("http://localhost/api/sample-report"));
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: "REAL_SAMPLE_UNAVAILABLE" });
+  });
+
+  it("uses the 'sample' rate-limit bucket and returns the typed guard error", async () => {
+    mocks.guard.mockResolvedValue({
+      ok: false,
+      status: 429,
+      code: "RATE_LIMITED",
+      error: "Too many requests.",
+      retryAfterMs: 1_200,
+    });
+    const response = await GET(new Request("http://localhost/api/sample-report"));
+    expect(mocks.guard.mock.calls[0]?.[1]).toEqual({ bucket: "sample" });
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("2");
+    expect(await response.json()).toEqual({
+      code: "RATE_LIMITED",
+      error: "Too many requests.",
+    });
+    expect(mocks.select).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/sample-report request id", () => {
+  it("adopts the proxy-forwarded x-request-id, including on the maintenance 503", async () => {
+    mocks.select.mockResolvedValue(null);
+    const forwarded = { headers: { "x-request-id": "proxy-id-1234" } };
+    const response = await GET(new Request("http://localhost/api/sample-report", forwarded));
+    expect(response.headers.get("x-request-id")).toBe("proxy-id-1234");
+
+    mocks.maintenance = true;
+    const maintenance = await GET(new Request("http://localhost/api/sample-report", forwarded));
+    expect(maintenance.status).toBe(503);
+    expect(maintenance.headers.get("x-request-id")).toBe("proxy-id-1234");
   });
 });

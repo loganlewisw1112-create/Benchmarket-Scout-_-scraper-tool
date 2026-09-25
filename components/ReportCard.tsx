@@ -1,14 +1,36 @@
 import DownloadPdfButton from "./DownloadPdfButton";
-import type { AnalyzeMarketResponse } from "@/lib/types";
+import { buildDataQualityNote } from "@/lib/report";
+import type { AnalyzeMarketResponse, ReportFinding } from "@/lib/types";
 import { CitationMarkers } from "./ProvenanceDetails";
+import { DEFAULT_EMPTY_ACTION_PLAN } from "./RecommendationPanel";
+import { displayStatus, rankText } from "./ScoreCards";
+
+const POSITION_FINDING_TITLE = "Observed market position";
 
 function signedMetric(value: number | null): string {
   if (value === null) return "N/A";
-  return `${value >= 0 ? "+" : ""}${value}`;
+  return `${value > 0 ? "+" : ""}${value || 0}`;
+}
+
+/**
+ * The on-screen top three always include the market-position finding (the
+ * PDF prints it too). Older stored reports listed it last, after up to three
+ * category findings, so it is moved to the front here.
+ */
+export function topFindingsForDisplay(findings: ReportFinding[]): ReportFinding[] {
+  const position = findings.filter((f) => f.title === POSITION_FINDING_TITLE);
+  const rest = findings.filter((f) => f.title !== POSITION_FINDING_TITLE);
+  return [...position, ...rest].slice(0, 3);
 }
 
 export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
   const { report, summary, dataQuality } = data;
+  const status = displayStatus(summary);
+  const dataQualityNote = buildDataQualityNote({
+    user: data.user,
+    competitors: data.competitors,
+    dataQuality,
+  });
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -26,23 +48,23 @@ export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
 
       <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-3">
         <div className="md:col-span-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">
             Executive Summary
           </h3>
           <p className="mt-1.5 text-sm leading-relaxed text-slate-700">
             {report.executiveSummary}
           </p>
 
-          <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
             Top 3 Findings
           </h3>
           <ul className="mt-1.5 space-y-2">
-            {report.topFindings.slice(0, 3).map((f, idx) => (
+            {topFindingsForDisplay(report.topFindings).map((f, idx) => (
               <li key={idx} className="text-sm text-slate-700">
                 <span className="font-medium text-slate-900">{f.title}:</span>{" "}
                 {f.finding}
                 <CitationMarkers sourceIds={f.sourceIds} />
-                <span className="ml-1.5 text-xs text-slate-400">
+                <span className="ml-1.5 text-xs text-slate-600">
                   ({f.confidence} confidence)
                 </span>
               </li>
@@ -51,7 +73,7 @@ export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
 
           {report.topRisks.length > 0 && (
             <>
-              <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
                 Possible Risks / Changes
               </h3>
               <ul className="mt-1.5 space-y-2">
@@ -62,7 +84,7 @@ export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
                     </span>{" "}
                     {risk.finding}
                     <CitationMarkers sourceIds={risk.sourceIds} />
-                    <span className="ml-1.5 text-xs text-slate-400">
+                    <span className="ml-1.5 text-xs text-slate-600">
                       ({risk.confidence} confidence)
                     </span>
                   </li>
@@ -73,32 +95,30 @@ export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
         </div>
 
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">
             Local Position
           </h3>
           <dl className="mt-1.5 space-y-1 text-sm">
             <div className="flex justify-between">
-              <dt className="text-slate-500">Status</dt>
+              <dt className="text-slate-600">Status</dt>
               <dd className="font-medium capitalize text-slate-900">
-                {summary.status ?? "N/A"}
+                {status ?? "N/A"}
               </dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-slate-500">Rank</dt>
+              <dt className="text-slate-600">Rank</dt>
               <dd className="font-medium text-slate-900">
-                {summary.yourRank === null
-                  ? "N/A"
-                  : `#${summary.yourRank} of ${summary.auditedCompetitorCount + 1}`}
+                {rankText(summary, data.user)}
               </dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-slate-500">Market gap</dt>
+              <dt className="text-slate-600">Market gap</dt>
               <dd className="font-medium text-slate-900">
                 {signedMetric(summary.marketGap)}
               </dd>
             </div>
             <div className="flex justify-between gap-4">
-              <dt className="text-slate-500">Competitor avg.</dt>
+              <dt className="text-slate-600">Competitor avg.</dt>
               <dd className="font-medium text-slate-900">
                 {summary.competitorAverageFinalScore === null
                   ? "N/A"
@@ -106,7 +126,7 @@ export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
               </dd>
             </div>
             <div className="flex justify-between gap-4">
-              <dt className="text-slate-500">Avg. website</dt>
+              <dt className="text-slate-600">Avg. website</dt>
               <dd className="font-medium text-slate-900">
                 {summary.competitorAverageWebsiteScore === null
                   ? "N/A"
@@ -115,24 +135,29 @@ export default function ReportCard({ data }: { data: AnalyzeMarketResponse }) {
             </div>
           </dl>
 
-          <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
             Top 5 Recommended Actions
           </h3>
-          <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-sm text-slate-700">
-            {report.actionPlan.slice(0, 5).map((rec, idx) => (
-              <li key={idx}>
-                {rec.title}
-                <CitationMarkers sourceIds={rec.sourceIds} />
-              </li>
-            ))}
-          </ol>
+          {report.actionPlan.length === 0 ? (
+            <p className="mt-1.5 text-sm text-slate-700">
+              {report.actionPlanNote ?? DEFAULT_EMPTY_ACTION_PLAN}
+            </p>
+          ) : (
+            <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-sm text-slate-700">
+              {report.actionPlan.slice(0, 5).map((rec, idx) => (
+                <li key={idx}>
+                  {rec.title}
+                  <CitationMarkers sourceIds={rec.sourceIds} />
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
       </div>
 
-      <div className="mt-5 border-t border-slate-100 pt-3 text-xs text-slate-500">
-        <span className="font-medium">Data quality:</span>{" "}
-        {report.dataQualityNote}
-        <span className="ml-1.5 font-semibold capitalize text-amber-700">
+      <div className="mt-5 border-t border-slate-100 pt-3 text-xs text-slate-600">
+        <span className="font-medium">Data quality:</span> {dataQualityNote}
+        <span className="ml-1.5 font-semibold capitalize text-amber-800">
           Coverage status: {dataQuality.coverageStatus}.
         </span>
       </div>

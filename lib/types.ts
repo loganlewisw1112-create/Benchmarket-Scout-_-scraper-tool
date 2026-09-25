@@ -81,12 +81,34 @@ export type NullableScoreBreakdown = {
   technical: number | null;
 };
 
+/**
+ * Machine-readable cause of a failed website audit (contract 5). The
+ * human-facing text lives in `WebsiteAudit.reason`; see lib/audit.ts.
+ */
+export type AuditFailureCode =
+  | "timeout"
+  | "blocked_by_site"
+  | "http_error"
+  | "dns_unresolved"
+  | "dns_error"
+  | "tls_error"
+  | "connection_failed"
+  | "too_large"
+  | "unsupported_content_type"
+  | "insufficient_content"
+  | "robots_disallowed"
+  | "too_many_redirects"
+  | "invalid_url"
+  | "blocked_url";
+
 export type WebsiteAudit = {
   url?: string;
   normalizedUrl?: string;
   auditStatus: AuditStatus;
   skipped: boolean;
   reason?: string;
+  /** Set on audits that failed inside the fetch/audit pipeline. */
+  reasonCode?: AuditFailureCode;
   sourceIds: SourceId[];
 
   title?: string;
@@ -169,6 +191,16 @@ export type CompetitorReport = {
 
   finalScore: number | null;
   rank: number | null;
+
+  /** Distance from the geocoded market center, in km (discovery, contract 6). */
+  distanceKm?: number;
+  /** Corporate chain / brand location; excluded from ranking (contract 6). */
+  isChain?: boolean;
+  brand?: string;
+  /** True when another scored business shares this exact final score and rank. */
+  rankTied?: boolean;
+  /** Human-readable reason this record carries no final score or rank. */
+  unscoredReason?: string;
 };
 
 export type MarketSummary = {
@@ -186,6 +218,14 @@ export type MarketSummary = {
     | null;
   strongestCompetitor?: string;
   biggestOpportunity?: string;
+  /**
+   * Present (2) on reports scored with shared tie ranks, N/A-normalized local
+   * presence and momentum, and a position-derived status. Absent on reports
+   * stored before that change, which keep their original (v1) semantics.
+   */
+  scoringVersion?: 2;
+  /** True when the user shares its rank with at least one competitor. */
+  yourRankTied?: boolean;
 };
 
 export type ReportFinding = {
@@ -223,8 +263,23 @@ export type BenchmarkReport = {
   topRisks: ReportFinding[];
   competitorHighlights: CompetitorHighlight[];
   actionPlan: Recommendation[];
+  /** Explicit statement shown when actionPlan is empty (e.g. no material gaps). */
+  actionPlanNote?: string;
   methodologyNote: string;
   dataQualityNote: string;
+};
+
+/**
+ * Per-competitor audit outcome counts (the user is reported separately).
+ * `failedAudits` on DataQuality counts every record without a usable audit;
+ * these split that into what actually happened.
+ */
+export type AuditOutcomeCounts = {
+  scored: number;
+  noWebsite: number;
+  auditFailed: number;
+  notAttempted: number;
+  excludedChains: number;
 };
 
 export type DataQuality = {
@@ -236,6 +291,20 @@ export type DataQuality = {
   unavailableFields: string[];
   cacheHit: boolean;
   notes: string[];
+  auditOutcomes?: AuditOutcomeCounts;
+  /**
+   * Named businesses of this type discovery found within the radius (the
+   * user's own listing excluded). `realCompetitorsFound` counts only the ones
+   * listed in the report, which is capped.
+   */
+  discoveredCount?: number;
+  /** True when OpenStreetMap hit its result cap, so discoveredCount is a floor. */
+  discoveryTruncated?: boolean;
+  /**
+   * Whether this analysis's website audits checked robots.txt before every
+   * fetch (STRICT_ROBOTS=true when it ran). Absent on older reports.
+   */
+  robotsPolicyEnforced?: boolean;
 };
 
 export type AnalyzeMarketResponse = {
@@ -248,6 +317,8 @@ export type AnalyzeMarketResponse = {
     lat: number;
     lon: number;
     bbox?: [number, number, number, number];
+    /** Discovery radius actually used, in km (contract 6). */
+    radiusKm?: number;
     source: "nominatim";
     sourceIds: SourceId[];
   };

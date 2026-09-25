@@ -2,6 +2,8 @@
 
 ## Setup
 
+Node 24 (`engines` pins `24.x`, the same as Vercel and CI).
+
 ```bash
 npm install
 cp .env.example .env.local   # optional; defaults work out of the box
@@ -37,6 +39,10 @@ npm run build       # production build (must be warning-free)
   or unsupported generic recommendations.
 - Every production finding, risk, recommendation, signal, and competitor must
   resolve its `sourceIds` in the report's Sources Appendix.
+- API errors use one body shape, `{ code, error, ...extras }`, with a
+  SCREAMING_SNAKE `code`. The UI keys its messages on `code`
+  (`lib/client-errors.ts`), so add a case there when you add a code, and list
+  it in the README's error table.
 - Commit messages: short imperative subject; body explains why when non-obvious.
 
 ## Notes

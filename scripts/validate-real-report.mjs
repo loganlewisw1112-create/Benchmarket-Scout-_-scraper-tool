@@ -8,6 +8,38 @@ const SOURCE_KINDS = new Set([
 ]);
 const SOURCE_STATUSES = new Set(["used", "limited", "unavailable"]);
 const FORBIDDEN_SOURCE_VALUE = /mock|demo|synthetic/i;
+// Keep in sync with CATEGORY_MAX_SCORES and computeFinalScore in lib/scoring.ts
+// (mirrored by assertScoreArithmetic in lib/invariants.ts).
+const CATEGORY_MAX_SCORES = { seo: 25, conversion: 25, trust: 20, content: 20, technical: 10 };
+
+function expectedFinalScore(entity) {
+  const values = [
+    entity.websiteAudit?.websiteScore,
+    entity.localPresenceScore,
+    entity.signals?.momentumScore,
+    entity.signals?.riskScore,
+  ];
+  if (values.some((value) => typeof value !== "number")) return null;
+  const [website, local, momentum, risk] = values;
+  return Math.round(0.6 * website + 0.2 * local + 0.15 * momentum + 0.05 * (100 - risk));
+}
+
+function validateScoreArithmetic(entity, path) {
+  const audit = entity.websiteAudit;
+  if (entity.auditStatus !== "unavailable" && isRecord(audit?.scoreBreakdown)) {
+    let sum = 0;
+    for (const [key, value] of Object.entries(audit.scoreBreakdown)) {
+      const max = CATEGORY_MAX_SCORES[key];
+      invariant(max !== undefined, `${path}.scoreBreakdown.${key} is not a known category`);
+      invariant(typeof value === "number" && value >= 0 && value <= max, `${path}.scoreBreakdown.${key} must be between 0 and ${max}`);
+      sum += value;
+    }
+    invariant(audit.websiteScore === sum, `${path}.websiteScore must equal its category sum`);
+  }
+  if (typeof entity.finalScore === "number" && Object.hasOwn(entity, "localPresenceScore")) {
+    invariant(entity.finalScore === expectedFinalScore(entity), `${path}.finalScore must match its component scores`);
+  }
+}
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -113,19 +145,46 @@ export function validateRealReport(report) {
   });
   invariant(sourceIdArrayCount > 0, "report has no source mappings");
 
+  // Scoring v2 (summary.scoringVersion === 2): shared tie ranks, a lone scored
+  // entity stays unranked, chain locations stay unscored. Older reports keep
+  // the v1 rule of unique, contiguous, score-ordered ranks.
+  const scoringV2 = report.summary?.scoringVersion === 2;
   const entities = [report.user, ...(Array.isArray(report.competitors) ? report.competitors : [])];
   entities.forEach((entity, index) => {
     invariant(isRecord(entity), `entity ${index} is invalid`);
-    validateUnavailableAudit(entity, index === 0 ? "user" : `competitors[${index - 1}]`);
+    const path = index === 0 ? "user" : `competitors[${index - 1}]`;
+    validateUnavailableAudit(entity, path);
+    validateScoreArithmetic(entity, path);
+    if (scoringV2 && entity.isChain === true) {
+      invariant(entity.finalScore === null && entity.rank === null, `${path} is a chain location and must stay unscored`);
+    }
     if (entity.rank !== null) {
       invariant(typeof entity.finalScore === "number", `ranked entity ${entity.name} must have a numeric finalScore`);
       invariant(entity.auditStatus !== "unavailable", `unavailable entity ${entity.name} must not be ranked`);
     }
   });
-  const ranks = entities.map((entity) => entity.rank).filter((rank) => rank !== null).sort((a, b) => a - b);
-  ranks.forEach((rank, index) => invariant(rank === index + 1, `rank sequence must be contiguous at ${index + 1}`));
+  const scored = entities.filter((entity) => typeof entity.finalScore === "number");
+  if (scoringV2) {
+    for (const entity of scored) {
+      const expectedRank = scored.length < 2
+        ? null
+        : 1 + scored.filter((other) => other.finalScore > entity.finalScore).length;
+      invariant(entity.rank === expectedRank, `rank of ${entity.name} is inconsistent with the observed scores`);
+      const tied = expectedRank !== null && scored.some((other) => other !== entity && other.finalScore === entity.finalScore);
+      invariant((entity.rankTied === true) === tied, `rankTied of ${entity.name} does not match the observed scores`);
+    }
+  } else {
+    const ranked = entities.filter((entity) => entity.rank !== null).sort((a, b) => a.rank - b.rank);
+    ranked.forEach((entity, index) => {
+      invariant(entity.rank === index + 1, `rank sequence must be contiguous at ${index + 1}`);
+      if (index > 0) {
+        invariant(entity.finalScore <= ranked[index - 1].finalScore, `rank sequence must be ordered by final score at ${index + 1}`);
+      }
+    });
+  }
+  const rankedCount = entities.filter((entity) => entity.rank !== null).length;
 
-  return { sourceCount: knownIds.size, scoredEntityCount: ranks.length };
+  return { sourceCount: knownIds.size, scoredEntityCount: rankedCount };
 }
 
 export function validateSharedReportHtml(html, report) {

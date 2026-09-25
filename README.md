@@ -85,6 +85,42 @@ And, deliberately, nowhere else. No paid APIs, no accounts, and nothing from
 Google Places, Yelp, SerpApi, LinkedIn, Instagram, TikTok, or X. Social
 profiles show up only when a public page links to them.
 
+Map data © OpenStreetMap contributors, under the Open Database License. The
+site footer, the PDF export, and every report's Sources Appendix carry that
+attribution with a link to <https://www.openstreetmap.org/copyright>.
+
+## Data freshness and caching
+
+The public map services are free and often slow, so some answers are reused.
+Every reuse keeps its real date:
+
+| What | Reused for |
+|---|---|
+| Geocoded market (Nominatim) | 30 days |
+| Competitor search (Overpass) | 72 hours; up to 14 days only if every live Overpass instance fails |
+| robots.txt | 24 hours |
+| Full analysis | 6 hours |
+| Homepage audits | 12 hours, per server instance only |
+
+- With the KV store configured, everything except homepage audits is cached
+  there under `cache:v1:<bucket>:<sha256>` keys that expire on their own, so
+  every instance shares it. Without KV, the same windows apply to a local
+  file cache under `CACHE_DIR`. A cache error falls back to a live fetch; it
+  never fails a request.
+- Each source in the Sources Appendix shows when it was actually fetched,
+  not when the report was built. A cached analysis keeps its original
+  `generatedAt` and is flagged `cacheHit`.
+- A cached competitor list is disclosed in the report's notes ("Competitor
+  list from OpenStreetMap as retrieved on <date>"). The cache key is the
+  exact Overpass query, so a different radius, center, or category never
+  reuses another search. With no usable copy and no live answer, the
+  analysis stops with `503 SOURCE_UNAVAILABLE`.
+- Overpass is asked at overpass-api.de, then overpass.private.coffee, then
+  maps.mail.ru. If none has answered after 7 s, the next one starts in
+  parallel (up to three at once), and a failed instance is replaced
+  immediately, all within a 24 s discovery budget. Queries allow 25 s on the
+  server.
+
 ## Run it locally
 
 ```bash
@@ -108,10 +144,13 @@ APP_USER_AGENT="BenchmarkScout/0.1 (contact: you@yourdomain.com)"
 Other environment variables you may want locally:
 
 ```bash
-CACHE_DIR=".cache"        # where fetched data and reports are cached
+CACHE_DIR=".cache"        # file cache, used when no KV store is configured
 STRICT_ROBOTS=false       # when true, every audit fetch checks robots.txt first
 MAINTENANCE_MODE=false    # when true, disables analysis but keeps /api/health up
 ```
+
+`.env.example` lists the rest, including `NEXT_PUBLIC_SITE_URL` (the canonical
+origin) and `ALLOW_PREVIEW_KV` (see [DEPLOY.md](./DEPLOY.md)).
 
 ## Tests and checks
 
@@ -138,10 +177,66 @@ needs the KV store plus a few environment variables — `KV_REST_API_URL` /
 holding state that keeps `/api/health` up while pausing analysis). The full list and
 the launch/rollback steps are in [DEPLOY.md](./DEPLOY.md).
 
-The API surface is small: `POST /api/analyze-market` runs the pipeline (rate-limited),
-`GET /api/health` reports liveness, `GET /api/sample-report` returns a cached real
-sample, `GET /api/reports/[id]` and `GET /r/[id]` read a saved report as JSON or as a
-shareable page, and `POST /api/waitlist` handles signups.
+The API surface is small:
+
+| Endpoint | What it does | Per-IP limit (per minute) |
+|---|---|---|
+| `POST /api/analyze-market` | Runs the pipeline. Also capped at 30 analyses a minute across all clients. | 10 |
+| `GET /api/sample-report` | Returns a saved real sample report. | 30 |
+| `POST /api/waitlist` | Email signup and feedback. Also capped at 10 new signups a minute overall. | 5 |
+| `GET /api/reports/[id]`, `GET /r/[id]` | Read a saved report as JSON or as a shareable page. | 60 |
+| `POST /api/sample-report/refresh` | Operator-only sample refresh (secret header). | 10 failed attempts |
+| `GET /api/health` | Health of the served sample pool and the store. | none |
+
+Each limit is its own bucket, so heavy report reading never eats into a
+client's analysis budget. Limits are counted in KV; if KV is unreachable they
+fall back to a per-instance in-memory counter, which is weaker because each
+serverless instance counts on its own.
+
+The two JSON POST endpoints (analyze and waitlist) accept only
+`Content-Type: application/json` from the same site: anything else gets
+`415 UNSUPPORTED_MEDIA_TYPE`, and a cross-site `Origin` or
+`Sec-Fetch-Site: cross-site` gets `403 CROSS_SITE_REQUEST`. The optional
+access code goes in the `x-scout-key` header only; the old `?key=` query
+parameter is gone.
+
+`/api/health` answers `200` with `status: "ok"` when at least 10 samples are
+fresher than 72 hours and the durable store is reachable. It answers `503`
+with `status: "degraded"` and the reasons in `alertReasons`
+(`ACTIVE_SAMPLES_LOW`, `SERVED_SAMPLES_STALE`, `DURABLE_STORE_UNAVAILABLE`)
+when any of those fail, so a plain HTTP monitor sees the problem. The ages it
+reports are for the samples actually being served, not the whole catalog.
+During maintenance it answers `200` with `maintenance: true`. A `200` may be
+cached at the edge for 30 seconds; a `503` never is.
+
+### Error responses
+
+Every API error has the same body: `{ "code": "SCREAMING_SNAKE", "error": "human message" }`,
+sometimes with extra fields such as `retryable` or `details`. The UI picks its
+message from `code`, so treat `code` as the contract and `error` as display
+text.
+
+| Status | Codes |
+|---|---|
+| 400 | `INVALID_REQUEST` |
+| 401 | `ACCESS_CODE_REQUIRED` |
+| 403 | `CROSS_SITE_REQUEST` |
+| 404 | `REPORT_NOT_FOUND`, `NOT_FOUND` (unknown `/api/*` path) |
+| 405 | `METHOD_NOT_ALLOWED` |
+| 410 | `LEGACY_REPORT_UNAVAILABLE` |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` |
+| 422 | `AMBIGUOUS_MARKET`, `MARKET_NOT_FOUND`, `INDUSTRY_NOT_RESOLVED`, `NO_COMPETITORS_FOUND`, `USER_SITE_UNAVAILABLE`, `INSUFFICIENT_REAL_DATA` |
+| 429 | `RATE_LIMITED` (with `Retry-After`) |
+| 500 | `INTERNAL_ERROR`, `REAL_DATA_INVARIANT_FAILED` (a report failed the provenance check and was not saved) |
+| 503 | `SOURCE_UNAVAILABLE` (retry later), `STORAGE_UNAVAILABLE`, `REAL_SAMPLE_UNAVAILABLE`, `MAINTENANCE` |
+| 504 | `ANALYSIS_TIMEOUT` (retry later) |
+
+The operator-only refresh route adds `UNAUTHORIZED` (401), `UNKNOWN_CATALOG_ID`
+(400), `SAMPLE_QUALITY_GATE_FAILED` (422), and `SAMPLE_REFRESH_NOT_CONFIGURED`
+(503).
+
+All the 422s from the analysis endpoint mean the same thing: there wasn't enough real evidence for an
+honest report, so nothing was saved.
 
 ## Project layout
 
@@ -152,7 +247,11 @@ limiting, robots.txt, storage, and logging. `components/` is the UI with co-loca
 tests, and `scripts/` is operator tooling.
 
 PDF export runs client-side (`jsPDF`) from the on-screen report — no second backend
-call. Server logs are single-line JSON, each analyze response tagged with an
+call. The PDF code only downloads when someone clicks the button. Names outside
+the basic Latin set are drawn with an embedded Noto Sans font (SIL OFL, in
+`public/fonts/`, fetched only when needed); any character that font can't draw
+either (CJK, for example) prints as `?` and the PDF says so, rather than
+garbling the line. Server logs are single-line JSON, each analyze response tagged with an
 `x-request-id` that's propagated through AsyncLocalStorage and repeated on every log
 line for that request.
 
@@ -167,9 +266,19 @@ line for that request.
   re-validates redirects.
 - **robots.txt** (`lib/robots.ts`, opt-in via `STRICT_ROBOTS=true`): every
   audit fetch — homepages, linked pages, each redirect hop — first checks the
-  site's robots.txt, honoring user-agent groups, longest-match
-  `Allow`/`Disallow`, `*` wildcards, and `$` anchors. Results cache for 24h; an
-  unreachable or malformed file fails open so audits keep working.
+  site's robots.txt, honoring user-agent groups (exact `BenchmarkScout` token,
+  repeated groups merged), longest-match `Allow`/`Disallow`, `*` wildcards, and
+  `$` anchors. Results cache for up to 24h: in KV when it is configured,
+  shared by every instance, otherwise in a per-instance file cache that a
+  cold start clears.
+  A missing (4xx), unreachable, or malformed file fails open so audits keep
+  working. A 5xx answer is treated as a full disallow for that lookup
+  (RFC 9309) and is not cached.
+- **Security headers** (`next.config.ts`) on every route: a Content Security
+  Policy locked to this origin (`frame-ancestors 'none'`), `X-Frame-Options:
+  DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+  strict-origin-when-cross-origin`, and a minimal `Permissions-Policy`.
+  `X-Powered-By` is off.
 
 ## Known limits
 
@@ -184,7 +293,8 @@ line for that request.
 
 ## Working on it
 
-Stack: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Zod, Vitest. Node 22+.
+Stack: Next.js 16, React 19, TypeScript, Tailwind CSS 4, Zod, Vitest. Node 24
+(`engines` pins `24.x`, matching Vercel and CI).
 
 Heads up for contributors: this repo runs Next 16, which changed enough that
 habits from older versions will bite you. See [AGENTS.md](./AGENTS.md) — read

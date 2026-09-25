@@ -32,10 +32,27 @@ jobs:
       REQUESTED_CATALOG_IDS: ${{ inputs.catalog_ids || '' }}
       REQUIRED_SUCCESSES: ${{ inputs.required_successes || '12' }}
     steps:
-      - name: Refresh twelve catalog entries sequentially
+      - name: Refresh every catalog entry sequentially
         shell: bash
+        # Time budget (job timeout is 90 min = 5400 s):
+        #   one attempt  <= 75 s (curl --max-time; the route's maxDuration is
+        #                   60 s, so a function timeout surfaces as a 504)
+        #   spacing       = 65 s between consecutive requests, none after the last
+        #   first pass   <= 25 x 75 + 24 x 65 = 3435 s (57.3 min), always completes
+        #   retries       = one per id, only for 503/504/network errors, queued
+        #                   after the first pass; each costs <= 65 + 75 = 140 s and
+        #                   is started only while it still fits before
+        #                   DEADLINE_SECONDS (5100 s = 85 min), so in the worst
+        #                   case about 11 retries run and the job still ends
+        #                   before the 90-min timeout.
         run: |
           set -euo pipefail
+          DEADLINE_SECONDS=5100
+          SPACING_SECONDS=65
+          MAX_ATTEMPT_SECONDS=75
+
+          # Must equal the ids in data/real-samples/catalog.json
+          # (lib/sample-catalog.test.ts enforces this).
           all_catalog=(
             hvac-absolute-air-solutions bakery-firebrand-bread dentistry-richard-tabor
             plumbing-berkeley-plumbing landscaping-rendered-stone law-andrew-dosa
@@ -47,7 +64,6 @@ jobs:
             cleaning-z-and-j gym-alameda-fitness daycare-little-blue-dolphins
             photography-clayton-mitchell
           )
-          catalog=("${all_catalog[@]}")
 
           if [[ -n "${REQUESTED_CATALOG_IDS//[[:space:]]/}" ]]; then
             IFS=',' read -ra requested_catalog <<< "$REQUESTED_CATALOG_IDS"
@@ -79,6 +95,13 @@ jobs:
               done
               catalog+=("$catalog_id")
             done
+          else
+            # Rotate the starting index daily (day-of-year mod catalog size) so
+            # no id is permanently last in line when upstreams are slow.
+            day_of_year=$((10#$(date -u +%j)))
+            start=$(( day_of_year % ${#all_catalog[@]} ))
+            catalog=("${all_catalog[@]:start}" "${all_catalog[@]:0:start}")
+            echo "Starting at index $start (${catalog[0]})."
           fi
 
           if ! [[ "$REQUIRED_SUCCESSES" =~ ^[1-9][0-9]*$ ]] ||
@@ -89,12 +112,21 @@ jobs:
 
           successes=0
           attempts=0
-          auth_failures=0
-          for catalog_id in "${catalog[@]}"; do
+          requests_sent=0
+          retry_queue=()
+          skipped_retries=0
+
+          # Sends one refresh. Sets last_outcome to one of:
+          #   ok | retryable | failed | auth | maintenance
+          refresh_once() {
+            local catalog_id="$1"
+            local response_body http_code code
+            if (( requests_sent > 0 )); then sleep "$SPACING_SECONDS"; fi
+            requests_sent=$((requests_sent + 1))
             attempts=$((attempts + 1))
             response_body="$(mktemp)"
             if http_code=$(curl --silent --show-error \
-              --connect-timeout 10 --max-time 75 \
+              --connect-timeout 10 --max-time "$MAX_ATTEMPT_SECONDS" \
               --output "$response_body" --write-out '%{http_code}' \
               --request POST "$SAMPLE_REFRESH_URL" \
               --header "content-type: application/json" \
@@ -102,27 +134,63 @@ jobs:
               --data "{\"catalogId\":\"$catalog_id\"}"); then
               if [[ "$http_code" =~ ^2 ]]; then
                 successes=$((successes + 1))
-                echo "Refreshed $catalog_id ($successes/$REQUIRED_SUCCESSES)."
+                echo "Refreshed $catalog_id ($successes/$REQUIRED_SUCCESSES required)."
+                last_outcome=ok
               else
-                echo "Refresh failed for $catalog_id with HTTP $http_code."
+                echo "Refresh failed for $catalog_id with HTTP $http_code:"
                 sed -e 's/[[:cntrl:]]/ /g' "$response_body"
+                echo
+                code=$(jq -r '.code // empty' "$response_body" 2>/dev/null | tr -cd 'A-Z_' || true)
                 if [[ "$http_code" == "401" ]]; then
-                  auth_failures=$((auth_failures + 1))
-                  echo "SAMPLE_REFRESH_SECRET mismatch (HTTP 401). Aborting remaining refreshes."
-                  rm -f "$response_body"
-                  exit 1
+                  last_outcome=auth
+                elif [[ "$code" == "MAINTENANCE" ]]; then
+                  last_outcome=maintenance
+                elif [[ "$http_code" == "503" || "$http_code" == "504" ]]; then
+                  last_outcome=retryable
+                else
+                  last_outcome=failed
                 fi
               fi
             else
-              echo "Refresh request failed for $catalog_id."
+              echo "Refresh request failed for $catalog_id (network error or timeout)."
+              last_outcome=retryable
             fi
             rm -f "$response_body"
+          }
 
-            if [ "$successes" -eq "$REQUIRED_SUCCESSES" ]; then break; fi
-            sleep 65
+          handle_fatal_outcome() {
+            if [[ "$last_outcome" == "auth" ]]; then
+              echo "SAMPLE_REFRESH_SECRET mismatch (HTTP 401). Aborting remaining refreshes."
+              exit 1
+            fi
+            if [[ "$last_outcome" == "maintenance" ]]; then
+              echo "::warning::Production is in maintenance mode; sample refresh skipped."
+              exit 0
+            fi
+          }
+
+          # First pass: attempt every id once.
+          for catalog_id in "${catalog[@]}"; do
+            refresh_once "$catalog_id"
+            handle_fatal_outcome
+            if [[ "$last_outcome" == "retryable" ]]; then
+              retry_queue+=("$catalog_id")
+            fi
           done
 
-          if [ "$successes" -lt "$REQUIRED_SUCCESSES" ]; then
-            echo "Only $successes of $REQUIRED_SUCCESSES required samples refreshed after $attempts attempts (auth_failures=$auth_failures)."
+          # Second pass: one retry per transiently failed id, while it fits.
+          for catalog_id in "${retry_queue[@]}"; do
+            if (( SECONDS + SPACING_SECONDS + MAX_ATTEMPT_SECONDS > DEADLINE_SECONDS )); then
+              skipped_retries=$((skipped_retries + 1))
+              continue
+            fi
+            echo "Retrying $catalog_id."
+            refresh_once "$catalog_id"
+            handle_fatal_outcome
+          done
+
+          echo "Refreshed $successes of ${#catalog[@]} catalog ids in $attempts attempts (retries queued=${#retry_queue[@]}, skipped for time=$skipped_retries)."
+          if (( successes < REQUIRED_SUCCESSES )); then
+            echo "Only $successes of $REQUIRED_SUCCESSES required samples refreshed."
             exit 1
           fi
