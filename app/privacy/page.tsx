@@ -14,7 +14,7 @@ const privacyPoints = [
   {
     title: "Report inputs are submitted business information.",
     detail:
-      "To build a report we process the business name, website, business type, and city or market you enter. Your website is fetched by our server like a normal visit. The market and business type are sent as search queries to the public data sources listed below, and business names are sent to GDELT to look for news mentions.",
+      "To build a report we process the business name, website, business type, and city or market you enter. Your website is fetched by our server like a normal visit. The market and business type are sent as search queries to the public data sources listed below.",
   },
   {
     title: "Reports are kept for 90 days and are public by link.",
@@ -54,7 +54,7 @@ const privacyPoints = [
   {
     title: "Report data comes from public sources.",
     detail:
-      "Markets are located with OpenStreetMap Nominatim, nearby businesses are found with the OpenStreetMap Overpass API, news mentions come from GDELT, and website signals come from each business's public homepage. Map data © OpenStreetMap contributors, available under the Open Database License.",
+      "Markets are located with OpenStreetMap Nominatim; nearby businesses are found in OpenStreetMap data (a weekly Geofabrik extract for the Bay Area, or the OpenStreetMap Overpass API elsewhere); and website signals come from each business's public homepage. Map data © OpenStreetMap contributors, available under the Open Database License.",
   },
   {
     title: "Use the feedback form to contact us or ask for deletion.",

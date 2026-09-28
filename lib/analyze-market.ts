@@ -427,6 +427,11 @@ function buildCompetitorReport(args: {
  * that an unsearched one keeps (news N/A), so observed articles are still
  * shown but left out of every momentum score (`newsCounted: false`).
  */
+/** GDELT news enrichment runs only when NEWS_ENABLED is "true". */
+export function newsEnabled(): boolean {
+  return process.env.NEWS_ENABLED === "true";
+}
+
 function applyNews(args: {
   news: CombinedNewsResult;
   records: CompetitorReport[];
@@ -545,6 +550,11 @@ function buildDataQuality(args: {
   ];
   // A cached competitor list is dated by when OpenStreetMap answered, never
   // by when this report was generated (see lib/overpass.ts).
+  if (args.discovery.extract) {
+    notes.push(
+      `Competitor list from OpenStreetMap data as of ${formatUtcMinute(args.discovery.extract.osmTimestamp)} (Geofabrik Northern California extract, rebuilt weekly); businesses that opened, closed, or changed after that date are not reflected.`
+    );
+  }
   if (args.discovery.cache) {
     const retrievedOn = formatUtcMinute(args.discovery.accessedAt);
     notes.push(
@@ -834,16 +844,29 @@ export async function analyzeMarket(
         discovery.radiusKm
       );
     }
-    const discoverySourceId = provenance.add({
-      kind: "openstreetmap",
-      provider: "OpenStreetMap Overpass",
-      title: `${input.businessType} businesses within ${discovery.radiusKm} km of ${geo.label}`,
-      // A reproducible, clickable citation: overpass-turbo opens the exact
-      // query. The raw API endpoint answers a browser GET with HTTP 406.
-      url: discovery.query ? overpassTurboUrl(discovery.query) : discovery.endpoint,
-      accessedAt: discovery.accessedAt,
-      status: discovery.truncated ? "limited" : "used",
-    });
+    const discoverySourceId = provenance.add(
+      discovery.extract
+        ? {
+            kind: "openstreetmap",
+            provider: "OpenStreetMap (Geofabrik extract)",
+            title: `${input.businessType} businesses within ${discovery.radiusKm} km of ${geo.label}, OpenStreetMap data as of ${formatUtcMinute(discovery.extract.osmTimestamp)}`,
+            url: discovery.extract.url,
+            accessedAt: discovery.accessedAt,
+            status: "used",
+          }
+        : {
+            kind: "openstreetmap",
+            provider: "OpenStreetMap Overpass",
+            title: `${input.businessType} businesses within ${discovery.radiusKm} km of ${geo.label}`,
+            // A reproducible, clickable citation: overpass-turbo opens the
+            // exact query. The raw API endpoint answers a browser GET with 406.
+            url: discovery.query
+              ? overpassTurboUrl(discovery.query)
+              : discovery.endpoint,
+            accessedAt: discovery.accessedAt,
+            status: discovery.truncated ? "limited" : "used",
+          }
+    );
 
     // Candidates arrive nearest first. Audit targets are the nearest ones
     // with an independent website; chain locations are listed, not audited.
@@ -889,13 +912,25 @@ export async function analyzeMarket(
       { id: "user", name: input.businessName },
       ...auditTargets.map((candidate) => ({ id: candidate.id, name: candidate.name })),
     ];
-    const newsPromise = fetchCombinedNewsSignals(newsEntities, {
-      signal: auditStage.signal,
-      budgetMs: Math.min(
-        ANALYSIS_TIMING_BUDGETS.newsMs,
-        remainingBudgetMs(auditDeadlineAt)
-      ),
-    });
+    // News is off unless NEWS_ENABLED=true: GDELT refused most requests in
+    // September 2026, so reports skip it rather than show news as N/A for
+    // nearly everyone. With nobody queried, applyNews records nothing.
+    const newsPromise: Promise<CombinedNewsResult> = newsEnabled()
+      ? fetchCombinedNewsSignals(newsEntities, {
+          signal: auditStage.signal,
+          budgetMs: Math.min(
+            ANALYSIS_TIMING_BUDGETS.newsMs,
+            remainingBudgetMs(auditDeadlineAt)
+          ),
+        })
+      : Promise.resolve({
+          status: "complete",
+          queryUrl: "",
+          accessedAt: new Date().toISOString(),
+          queried: [],
+          skipped: newsEntities.map((entity) => entity.id),
+          articlesByEntity: {},
+        });
     let audits: Awaited<ReturnType<typeof runAudits>>;
     let news: CombinedNewsResult;
     try {
@@ -1051,6 +1086,7 @@ export async function analyzeMarket(
       scoredCompetitors: dataQuality.scoredCompetitors,
       failedAudits: dataQuality.failedAudits,
       radiusKm: discovery.radiusKm,
+      discoverySource: discovery.discoverySource,
       discoveryCache: discovery.cache ?? "live",
       newsStatus: news.status,
       durationMs: Date.now() - pipelineStartedAt,

@@ -25,7 +25,7 @@
 </p>
 
 Give it a business, a type, and a city. It finds the real competitors nearby,
-audits their public websites, pulls public news mentions, scores what it can
+audits their public websites, scores what it can
 actually verify, and writes up a source-backed report you can read on screen,
 share by link, or export to PDF.
 
@@ -38,8 +38,9 @@ isn't there, it says so instead of guessing.
 The analysis runs as a pipeline, one stage feeding the next:
 
 1. **Geocode** the market with Nominatim to get a real bounding box.
-2. **Discover** nearby businesses of the same type from OpenStreetMap via
-   Overpass.
+2. **Discover** nearby businesses of the same type from OpenStreetMap: a
+   weekly Bay Area index built from the Geofabrik extract, or live Overpass
+   for markets outside the Bay Area.
 3. **Audit** each one's public website directly — structure, signals, linked
    public pages — no paid data brokers in the loop.
 4. **Score** only the businesses whose sites actually audited. Anything it
@@ -77,9 +78,15 @@ about a company's internal reality.
 ## Where the data comes from
 
 - **Nominatim** — geocoding the market.
-- **Overpass / OpenStreetMap** — discovering local competitors.
+- **OpenStreetMap** — discovering local competitors. Bay Area markets use a
+  weekly index built from the free Geofabrik Northern California extract
+  (`.github/workflows/osm-index.yml`, published as the `osm-index-bayarea`
+  release); everywhere else queries public Overpass live.
 - **Public websites** — fetched directly for the audit, no third-party APIs.
-- **GDELT and linked public articles** — public news mentions.
+
+GDELT news enrichment exists in the code but is off by default
+(`NEWS_ENABLED=true` turns it on): in September 2026 GDELT refused most
+requests, so nearly every report showed news as N/A.
 
 And, deliberately, nowhere else. No paid APIs, no accounts, and nothing from
 Google Places, Yelp, SerpApi, LinkedIn, Instagram, TikTok, or X. Social
@@ -97,7 +104,8 @@ Every reuse keeps its real date:
 | What | Reused for |
 |---|---|
 | Geocoded market (Nominatim) | 30 days |
-| Competitor search (Overpass) | 72 hours; up to 14 days only if every live Overpass instance fails |
+| Competitor search, Bay Area | The weekly OSM extract; the report cites its OSM data date |
+| Competitor search elsewhere (Overpass) | 72 hours; up to 14 days only if every live Overpass instance fails |
 | robots.txt | 24 hours |
 | Full analysis | 6 hours |
 | Homepage audits | 12 hours, per server instance only |
@@ -118,8 +126,8 @@ Every reuse keeps its real date:
 - Overpass is asked at overpass-api.de, then overpass.private.coffee, then
   maps.mail.ru. If none has answered after 7 s, the next one starts in
   parallel (up to three at once), and a failed instance is replaced
-  immediately, all within a 24 s discovery budget. Queries allow 25 s on the
-  server.
+  immediately, all within a 24 s discovery budget. Queries declare an 8 s
+  server timeout: busy instances refuse queries that declare longer ones.
 
 ## Run it locally
 

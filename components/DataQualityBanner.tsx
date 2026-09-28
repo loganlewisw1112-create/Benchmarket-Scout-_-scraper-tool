@@ -88,8 +88,8 @@ export default function DataQualityBanner({
   return (
     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
       <p className="font-medium">
-        This report uses real public data from OpenStreetMap, public websites,
-        and, where available, public news sources. Unavailable evidence stays
+        This report uses real public data from OpenStreetMap and public
+        business websites. Unavailable evidence stays
         N/A rather than being replaced with estimated or demo values. Signals
         are directional, not verified internal company facts.
       </p>

@@ -351,10 +351,10 @@ export default function HomePage({
           <p className="font-medium text-slate-700">How this works</p>
           <p className="mt-1 max-w-3xl">
             Benchmark Scout geocodes your market with Nominatim, discovers
-            nearby businesses from OpenStreetMap/Overpass, audits public
-            homepages for SEO/conversion/trust/content/technical signals, scans
-            them for public momentum, risk, offer, and hiring language, and
-            checks GDELT for public news mentions when it is reachable. Sparse
+            nearby businesses from OpenStreetMap (a weekly Bay Area data
+            extract, or the live Overpass API elsewhere), audits public
+            homepages for SEO/conversion/trust/content/technical signals, and
+            scans them for public momentum, risk, offer, and hiring language. Sparse
             or unavailable evidence is shown honestly as N/A; it is never
             filled with simulated data. Every report includes its source
             appendix. Nothing here accesses private accounts, bypasses logins,

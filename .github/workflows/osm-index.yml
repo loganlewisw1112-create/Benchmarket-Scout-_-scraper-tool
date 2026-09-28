@@ -1,0 +1,96 @@
+name: Build Bay Area OSM index
+
+# Weekly: download the Geofabrik Northern California OpenStreetMap extract,
+# keep named businesses inside the Bay Area bounding box, and publish the
+# compact index lib/osm-index.ts serves competitor discovery from. Public
+# Overpass stays the fallback for markets outside the Bay Area.
+#
+# Pull requests that touch the builder run the full build as a check but do
+# not publish.
+
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/osm-index.yml"
+      - "scripts/build-osm-index.mjs"
+      - "scripts/build-osm-index-lib.mjs"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: osm-index
+  cancel-in-progress: false
+
+env:
+  EXTRACT_URL: https://download.geofabrik.de/north-america/us/california/norcal-latest.osm.pbf
+  # south,west,north,east must match BAY_AREA_BBOX in scripts/build-osm-index.mjs
+  # and lib/osm-index.ts. osmium takes west,south,east,north.
+  OSMIUM_BBOX: "-123.15,36.85,-121.2,38.65"
+  RELEASE_TAG: osm-index-bayarea
+  ASSET: bayarea-pois.json.gz
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install osmium
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq osmium-tool
+          osmium --version | head -1
+
+      - name: Download the Northern California extract
+        run: |
+          curl --fail --silent --show-error --location \
+            --user-agent "BenchmarkScout-index-builder (+https://github.com/${GITHUB_REPOSITORY})" \
+            --output norcal.osm.pbf "$EXTRACT_URL"
+          ls -lh norcal.osm.pbf
+
+      - name: Filter to named Bay Area businesses
+        run: |
+          set -euo pipefail
+          osmium extract --bbox "$OSMIUM_BBOX" --overwrite -o bayarea.osm.pbf norcal.osm.pbf
+          osmium tags-filter --overwrite -o poi.osm.pbf bayarea.osm.pbf \
+            nwr/amenity nwr/craft nwr/healthcare nwr/leisure nwr/office \
+            nwr/shop nwr/sport nwr/tourism
+          osmium export --overwrite -f geojsonseq --add-unique-id=type_id \
+            -o poi.geojsonseq poi.osm.pbf
+          ls -lh poi.osm.pbf poi.geojsonseq
+
+      - name: Build the index
+        run: |
+          set -euo pipefail
+          timestamp="$(osmium fileinfo -g header.option.osmosis_replication_timestamp norcal.osm.pbf || true)"
+          if [[ -z "$timestamp" ]]; then
+            timestamp="$(curl --silent --head --location "$EXTRACT_URL" | tr -d '\r' | awk -F': ' 'tolower($1)=="last-modified"{print $2}' | tail -1)"
+          fi
+          echo "OSM data timestamp: $timestamp"
+          node scripts/build-osm-index.mjs --input poi.geojsonseq \
+            --timestamp "$timestamp" --out "$ASSET" --min-count 20000
+
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "Bay Area OpenStreetMap business index" \
+              --latest=false \
+              --notes "Named Bay Area businesses from the Geofabrik Northern California extract, rebuilt weekly by .github/workflows/osm-index.yml. Data (c) OpenStreetMap contributors, available under the Open Database License (ODbL 1.0): https://www.openstreetmap.org/copyright"
+          fi
+          gh release upload "$RELEASE_TAG" "$ASSET" --repo "$GITHUB_REPOSITORY" --clobber

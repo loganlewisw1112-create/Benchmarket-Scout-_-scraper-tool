@@ -69,8 +69,8 @@ export default function SignalPanel({
         Signal Intelligence
       </h3>
       <p className="mt-1 text-xs text-slate-600">
-        Public signals observed on homepages, linked pages, and public news —
-        directional, not verified internal facts.
+        Public signals observed on homepages and linked pages — directional,
+        not verified internal facts.
       </p>
       {!newsObserved && newsUnavailable ? (
         <p className="mt-1 text-xs text-slate-600">
