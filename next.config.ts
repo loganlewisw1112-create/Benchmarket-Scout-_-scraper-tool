@@ -85,6 +85,12 @@ export function buildSecurityHeaders(
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // The Bay Area OSM index downloaded at build time (scripts/fetch-osm-index.mjs)
+  // ships with the routes that run competitor discovery.
+  outputFileTracingIncludes: {
+    "/api/analyze-market": ["./data/osm-index/**/*"],
+    "/api/sample-report/refresh": ["./data/osm-index/**/*"],
+  },
   async headers() {
     return [
       {

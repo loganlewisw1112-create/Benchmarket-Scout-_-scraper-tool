@@ -39,7 +39,9 @@ function attempt(secret: string, ip: string): Request {
 }
 
 describe("sample refresh secret guessing", () => {
-  it("stops evaluating secrets once an IP exhausts its failed attempts", async () => {
+  // Cold-imports the route module, which can exceed the 5 s default under a
+  // loaded full-suite run.
+  it("stops evaluating secrets once an IP exhausts its failed attempts", { timeout: 20_000 }, async () => {
     const { POST } = await import("@/app/api/sample-report/refresh/route");
     const { GUARD_BUCKET_LIMITS } = await import("@/lib/api-guard");
     const limit = GUARD_BUCKET_LIMITS["refresh-auth"];

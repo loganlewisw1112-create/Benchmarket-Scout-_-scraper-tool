@@ -7,7 +7,7 @@
     "dev": "next dev",
     "check:real-data-only": "node scripts/check-real-data-only.mjs",
     "gate:preview": "node scripts/run-alameda-gate.mjs",
-    "prebuild": "npm run check:real-data-only",
+    "prebuild": "npm run check:real-data-only && node scripts/fetch-osm-index.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
