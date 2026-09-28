@@ -10,6 +10,8 @@
 // when a report ran. Markets outside the index, or any failure to load it,
 // fall back to live Overpass (lib/overpass.ts).
 
+import fs from "node:fs";
+import path from "node:path";
 import zlib from "node:zlib";
 import { logger, serializeError } from "./logger";
 import type { OsmTagPair, OverpassElement } from "./overpass";
@@ -23,6 +25,9 @@ export const DEFAULT_OSM_INDEX_URL =
 // An index older than this is not used: the weekly build has clearly stopped,
 // and live Overpass is the more current source.
 export const OSM_INDEX_MAX_AGE_MS = 45 * 24 * 60 * 60 * 1000;
+// A copy bundled at build time (scripts/fetch-osm-index.mjs) is used as-is
+// while younger than this; after that a fresher download is tried first.
+const BUNDLED_PREFERRED_MAX_AGE_MS = 10 * 24 * 60 * 60 * 1000;
 // A warm instance re-downloads after this, so a new weekly build is picked up.
 const RELOAD_AFTER_MS = 6 * 60 * 60 * 1000;
 // After a failed download, wait this long before trying again.
@@ -52,6 +57,8 @@ export type OsmIndex = {
 const TYPE_NAMES = { n: "node", w: "way", r: "relation" } as const;
 
 let loaded: { index: OsmIndex; at: number } | null = null;
+// undefined: not read yet; null: no usable bundled copy.
+let bundled: OsmIndex | null | undefined;
 let inflight: Promise<OsmIndex | null> | null = null;
 let lastFailureAt = 0;
 
@@ -119,6 +126,25 @@ export function parseOsmIndex(json: string): OsmIndex {
   };
 }
 
+/** The index bundled into this deployment at build time, if any. */
+function readBundledIndex(): OsmIndex | null {
+  if (bundled !== undefined) return bundled;
+  try {
+    const file =
+      process.env.OSM_INDEX_FILE ||
+      path.join(
+        /* turbopackIgnore: true */ process.cwd(),
+        "data",
+        "osm-index",
+        "bayarea-pois.json.gz"
+      );
+    bundled = parseOsmIndex(zlib.gunzipSync(fs.readFileSync(file)).toString("utf8"));
+  } catch {
+    bundled = null;
+  }
+  return bundled;
+}
+
 async function download(signal?: AbortSignal): Promise<OsmIndex> {
   const url = process.env.OSM_INDEX_URL || DEFAULT_OSM_INDEX_URL;
   const timeout = AbortSignal.timeout(LOAD_TIMEOUT_MS);
@@ -139,6 +165,11 @@ async function download(signal?: AbortSignal): Promise<OsmIndex> {
 export async function loadOsmIndex(signal?: AbortSignal): Promise<OsmIndex | null> {
   if (process.env.OSM_INDEX_DISABLED === "true") return null;
   const now = Date.now();
+  // A recent bundled copy needs no network at all.
+  const local = readBundledIndex();
+  if (local && now - Date.parse(local.osmTimestamp) <= BUNDLED_PREFERRED_MAX_AGE_MS) {
+    return local;
+  }
   let index: OsmIndex | null = null;
   if (loaded && now - loaded.at < RELOAD_AFTER_MS) {
     index = loaded.index;
@@ -151,15 +182,15 @@ export async function loadOsmIndex(signal?: AbortSignal): Promise<OsmIndex | nul
       .catch((err: unknown) => {
         lastFailureAt = Date.now();
         logger.warn("OSM index unavailable; falling back to live Overpass", serializeError(err));
-        // Keep serving the previous copy if there is one.
-        return loaded?.index ?? null;
+        // Keep serving the previous copy, or the bundled one, if there is one.
+        return loaded?.index ?? local;
       })
       .finally(() => {
         inflight = null;
       });
     index = await inflight;
   } else {
-    index = loaded?.index ?? null;
+    index = loaded?.index ?? local;
   }
   if (index && now - Date.parse(index.osmTimestamp) > OSM_INDEX_MAX_AGE_MS) {
     logger.warn("OSM index is too old to use; falling back to live Overpass", {
@@ -216,4 +247,5 @@ export function resetOsmIndexForTests(): void {
   loaded = null;
   inflight = null;
   lastFailureAt = 0;
+  bundled = undefined;
 }

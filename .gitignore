@@ -63,3 +63,6 @@ __trunc_test.tmp
 
 # excluded 2026-09-08 - stale scratch/test-run output
 /.tmp-*
+
+# Bay Area OSM index fetched at build time (scripts/fetch-osm-index.mjs)
+/data/osm-index/

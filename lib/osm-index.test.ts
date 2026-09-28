@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import zlib from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { discoverCompetitors } from "./discover";
@@ -76,7 +79,34 @@ describe("parseOsmIndex", () => {
 describe("loadOsmIndex", () => {
   beforeEach(() => {
     delete process.env.OSM_INDEX_DISABLED;
+    // No bundled copy unless a test provides one.
+    process.env.OSM_INDEX_FILE = path.join(os.tmpdir(), "no-such-osm-index.json.gz");
     resetOsmIndexForTests();
+  });
+
+  it("uses a recent bundled copy without any network call", async () => {
+    const file = path.join(os.tmpdir(), `osm-index-test-${process.pid}.json.gz`);
+    fs.writeFileSync(file, gz(indexDoc()));
+    process.env.OSM_INDEX_FILE = file;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const index = await loadOsmIndex();
+    expect(index?.elements).toHaveLength(5);
+    expect(fetchMock).not.toHaveBeenCalled();
+    fs.rmSync(file, { force: true });
+  });
+
+  it("downloads when the bundled copy is older than 10 days, and falls back to it if that fails", async () => {
+    const file = path.join(os.tmpdir(), `osm-index-test-old-${process.pid}.json.gz`);
+    const old = indexDoc({ osmTimestamp: new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString() });
+    fs.writeFileSync(file, gz(old));
+    process.env.OSM_INDEX_FILE = file;
+    const fetchMock = vi.fn(async () => new Response("nope", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const index = await loadOsmIndex();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(index?.osmTimestamp).toBe(old.osmTimestamp);
+    fs.rmSync(file, { force: true });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -119,6 +149,7 @@ describe("loadOsmIndex", () => {
 describe("discoverCompetitors with the index", () => {
   beforeEach(() => {
     delete process.env.OSM_INDEX_DISABLED;
+    process.env.OSM_INDEX_FILE = path.join(os.tmpdir(), "no-such-osm-index.json.gz");
     resetOsmIndexForTests();
   });
   afterEach(() => {
