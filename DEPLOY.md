@@ -125,8 +125,12 @@ endpoint is not rate-limited and does not log each poll.
 
 A sample-pool alert means the daily refresh is not keeping up. It does not by
 itself mean reports are wrong: fix the refresh (the `Refresh real sample
-reports` workflow) rather than rolling back. The usual cause is public
-Overpass being down. A refresh reuses a competitor search under 72 hours old
+reports` workflow) rather than rolling back. Bay Area catalog entries use the
+weekly OSM index, so they no longer depend on public Overpass; if the index
+is missing or older than 45 days, discovery falls back to Overpass. Check the
+`Build Bay Area OSM index` workflow and the `osm-index-bayarea` release first.
+For markets outside the Bay Area the usual cause is public Overpass being
+down. A refresh reuses a competitor search under 72 hours old
 without asking Overpass, and falls back to one up to 14 days old if every
 Overpass instance fails; either way the report's notes carry the list's
 original retrieval date. A catalog entry with no saved search still fails

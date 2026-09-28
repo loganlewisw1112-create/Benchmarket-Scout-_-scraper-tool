@@ -325,7 +325,7 @@ export function buildDataQualityNote(args: {
 }
 
 export const METHODOLOGY_NOTE =
-  "Scores and ranks use only successfully fetched public homepage observations, OpenStreetMap directory records and, where available, GDELT news results. An input that could not be observed for a business is N/A and is left out of that business's maximum instead of being counted as zero; this applies to your business and to competitors alike. Equal scores share a rank. Corporate chain locations are listed but not ranked.";
+  "Scores and ranks use only successfully fetched public homepage observations, and OpenStreetMap directory records. An input that could not be observed for a business is N/A and is left out of that business's maximum instead of being counted as zero; this applies to your business and to competitors alike. Equal scores share a rank. Corporate chain locations are listed but not ranked.";
 
 function buildActionPlanNote(args: {
   user: CompetitorReport;

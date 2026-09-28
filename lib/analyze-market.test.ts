@@ -244,6 +244,8 @@ function discovery(
 describe("analyzeMarket real-data-only orchestration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // These tests exercise the news path; production has it off by default.
+    process.env.NEWS_ENABLED = "true";
     vi.mocked(readCache).mockResolvedValue(null);
     vi.mocked(discoverCompetitors).mockResolvedValue(
       discovery([
@@ -560,6 +562,19 @@ describe("analyzeMarket real-data-only orchestration", () => {
           source.kind === "openstreetmap" && source.businessName === input.businessName
       )
     ).toBe(false);
+  });
+
+  it("skips GDELT entirely and adds no news note when NEWS_ENABLED is not true", async () => {
+    delete process.env.NEWS_ENABLED;
+
+    const response = await analyzeMarket(input);
+
+    expect(fetchCombinedNewsSignals).not.toHaveBeenCalled();
+    expect(response.user.signals.newsStatus).toBe("not_requested");
+    expect(response.dataQuality.unavailableFields.some((f) => f.endsWith(".newsSignals"))).toBe(false);
+    expect(response.dataQuality.notes.some((n) => /news/i.test(n))).toBe(false);
+    expect(response.provenance.sources.some((s) => s.provider === "GDELT")).toBe(false);
+    expect(() => assertRealDataResponse(response)).not.toThrow();
   });
 
   it("makes one combined news request and marks unavailable news as N/A", async () => {

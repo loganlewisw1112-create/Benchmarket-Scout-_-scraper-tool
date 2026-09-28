@@ -11,6 +11,8 @@ beforeEach(() => {
   delete process.env.KV_REST_API_TOKEN;
   delete process.env.UPSTASH_REDIS_REST_URL;
   delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  // Tests never download the Bay Area OSM index; lib/osm-index tests opt in.
+  process.env.OSM_INDEX_DISABLED = "true";
 });
 
 // RTL's automatic cleanup needs a global afterEach, which vitest only

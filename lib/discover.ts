@@ -6,6 +6,7 @@ import {
   type OverpassCacheUse,
   type OverpassElement,
 } from "./overpass";
+import { loadOsmIndex, osmIndexCovers, queryOsmIndex } from "./osm-index";
 import { remainingBudgetMs } from "./time-budget";
 import { normalizeHttpUrl } from "./url-safety";
 
@@ -34,7 +35,11 @@ export type DiscoveredCandidate = {
 export type DiscoveryResult = {
   /** Named competitors, nearest to the market center first. */
   candidates: DiscoveredCandidate[];
-  discoverySource: "overpass";
+  /**
+   * "osm-extract": the weekly Bay Area index (lib/osm-index.ts);
+   * "overpass": a live (or cached) public Overpass query.
+   */
+  discoverySource: "overpass" | "osm-extract";
   status: "complete" | "limited";
   queryPerformed: boolean;
   endpoint?: string;
@@ -53,6 +58,8 @@ export type DiscoveryResult = {
    * query; `accessedAt` is then the original retrieval time (lib/overpass.ts).
    */
   cache?: OverpassCacheUse;
+  /** Set when discoverySource is "osm-extract". */
+  extract?: { url: string; osmTimestamp: string; builtAt: string };
 };
 
 const EARTH_RADIUS_KM = 6371.0088;
@@ -584,6 +591,37 @@ export async function discoverCompetitors(args: {
     };
   }
 
+  // Bay Area markets are served from the weekly OSM extract index, which is
+  // not subject to public Overpass outages. Any failure falls through to the
+  // live query below.
+  if (osmIndexCovers(args.lat, args.lon, radiusKm * 1000)) {
+    const index = await loadOsmIndex(args.signal);
+    if (index) {
+      const elements = queryOsmIndex(
+        index,
+        resolution.tags,
+        args.lat,
+        args.lon,
+        radiusKm * 1000
+      );
+      return {
+        ...candidatesFrom(elements, args),
+        discoverySource: "osm-extract",
+        status: "complete",
+        queryPerformed: true,
+        accessedAt: index.osmTimestamp,
+        radiusKm,
+        truncated: false,
+        resolution,
+        extract: {
+          url: index.source.url,
+          osmTimestamp: index.osmTimestamp,
+          builtAt: index.builtAt,
+        },
+      };
+    }
+  }
+
   let query = await queryOverpassDetailed(
     args.businessType,
     args.lat,
@@ -619,7 +657,33 @@ export async function discoverCompetitors(args: {
     }
   }
 
-  const located = query.elements
+  return {
+    ...candidatesFrom(query.elements, args),
+    discoverySource: "overpass",
+    status: query.truncated ? "limited" : "complete",
+    queryPerformed: true,
+    endpoint: query.endpoint,
+    accessedAt: query.accessedAt,
+    query: query.query,
+    radiusKm,
+    truncated: query.truncated,
+    resolution,
+    ...(query.cache ? { cache: query.cache } : {}),
+  };
+}
+
+/** Located, deduped, chain-flagged candidates, nearest first, minus the user. */
+function candidatesFrom(
+  elements: OverpassElement[],
+  args: {
+    businessType: string;
+    userBusinessName: string;
+    userDomain?: string;
+    lat: number;
+    lon: number;
+  }
+): Pick<DiscoveryResult, "candidates" | "userMatch"> {
+  const located = elements
     .map((element) => elementToCandidate(element, args.businessType))
     .filter(
       (candidate): candidate is DiscoveredCandidate =>
@@ -640,16 +704,6 @@ export async function discoverCompetitors(args: {
   );
   return {
     candidates: competitors.sort(byDistance),
-    discoverySource: "overpass",
-    status: query.truncated ? "limited" : "complete",
-    queryPerformed: true,
-    endpoint: query.endpoint,
-    accessedAt: query.accessedAt,
-    query: query.query,
-    radiusKm,
-    truncated: query.truncated,
-    resolution,
     ...(userMatch ? { userMatch } : {}),
-    ...(query.cache ? { cache: query.cache } : {}),
   };
 }
