@@ -15,13 +15,18 @@ describe("real sample catalog", () => {
   });
 
   it("benchmarks a business in the city its own domain names", () => {
-    // Addresses checked on the businesses' own sites on 2026-09-24. These two
-    // could not be confirmed (no address found / 403), so their market was
-    // left unchanged rather than guessed.
-    const unverified = new Set(["roofing-bay-roofing", "florist-central-florist"]);
-    const cities = ["hayward", "alameda", "oakland", "berkeley"];
+    // Every market is the business's own city (OSM addr:city, checked against
+    // the business's site where it states an address, 2026-09-28).
+    const markets = new Set([
+      "Alameda, CA",
+      "Oakland, CA",
+      "Berkeley, CA",
+      "San Francisco, CA",
+      "San Jose, CA",
+    ]);
+    const cities = ["alameda", "oakland", "berkeley"];
     for (const entry of SAMPLE_CATALOG) {
-      if (unverified.has(entry.id)) continue;
+      expect(markets.has(entry.market), `${entry.id}: ${entry.market}`).toBe(true);
       const host = new URL(entry.businessUrl).hostname;
       const named = cities.filter((city) => host.includes(city));
       if (named.length !== 1) continue;
@@ -29,9 +34,7 @@ describe("real sample catalog", () => {
         `${entry.id}: ${named[0]![0]!.toUpperCase()}${named[0]!.slice(1)}, CA`
       );
     }
-    expect(SAMPLE_CATALOG.find((entry) => entry.id === "hvac-absolute-air-solutions")?.market).toBe(
-      "Hayward, CA"
-    );
+    expect(new Set(SAMPLE_CATALOG.map((entry) => entry.market)).size).toBe(markets.size);
   });
 
   it("matches the id list the daily refresh workflow iterates", () => {
